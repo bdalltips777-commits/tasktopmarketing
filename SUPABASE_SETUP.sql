@@ -1,0 +1,402 @@
+-- ====================================================================
+-- TASK TOP MARKETING - SUPABASE DATABASE REWRITE SETUP SCRIPT
+-- Copy this entire script and run it in your Supabase SQL Editor
+-- (https://supabase.com/dashboard/project/_/sql)
+-- ====================================================================
+
+-- 1. ENABLE REQUIRED EXTENSIONS
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- 2. CREATE PROFILES TABLE (REFERENCES AUTH.USERS)
+CREATE TABLE IF NOT EXISTS public.profiles (
+    id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL,
+    full_name TEXT,
+    wallet_balance NUMERIC(10,2) DEFAULT 0.00 CONSTRAINT wallet_balance_check CHECK (wallet_balance >= 0),
+    role TEXT DEFAULT 'user',
+    referral_code TEXT UNIQUE NOT NULL,
+    referred_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+    phone_number TEXT DEFAULT '',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, now()) NOT NULL
+);
+
+-- Enable Row Level Security (RLS) on Profiles
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+-- Profiles Policies
+CREATE POLICY "Allow public read profiles" ON public.profiles FOR SELECT USING (true);
+CREATE POLICY "Allow users to insert their own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
+CREATE POLICY "Allow users to update their own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
+
+-- 3. CREATE SYSTEM SETTINGS TABLE (SINGLE ROW)
+CREATE TABLE IF NOT EXISTS public.system_settings (
+    id INTEGER PRIMARY KEY DEFAULT 1 CONSTRAINT single_row_check CHECK (id = 1),
+    gmail_price NUMERIC(10,2) DEFAULT 10.00,
+    gmail_password TEXT DEFAULT 'GmailPass123',
+    fb_price NUMERIC(10,2) DEFAULT 15.00,
+    fb_password TEXT DEFAULT 'FBPass123',
+    ig_price NUMERIC(10,2) DEFAULT 12.00,
+    ig_password TEXT DEFAULT 'IGPass123',
+    activation_fee NUMERIC(10,2) DEFAULT 0.00,
+    referral_bonus NUMERIC(10,2) DEFAULT 5.00,
+    min_withdraw NUMERIC(10,2) DEFAULT 50.00,
+    banner_url TEXT DEFAULT 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1200&auto=format&fit=crop',
+    scrolling_notice TEXT DEFAULT '',
+    gmail_status BOOLEAN DEFAULT TRUE,
+    fb_status BOOLEAN DEFAULT TRUE,
+    ig_status BOOLEAN DEFAULT TRUE,
+    referral_domain TEXT DEFAULT 'tasktopmarketing.onrender.com',
+    telegram_support_link TEXT DEFAULT '',
+    telegram_channel_link TEXT DEFAULT ''
+);
+
+-- ==========================================
+-- ADD NEW COLUMNS TO EXISTING SYSTEM SETTINGS
+-- Run these individually if you already have the table
+-- ==========================================
+-- ALTER TABLE public.system_settings ADD COLUMN IF NOT EXISTS telegram_support_link TEXT DEFAULT '';
+-- ALTER TABLE public.system_settings ADD COLUMN IF NOT EXISTS telegram_channel_link TEXT DEFAULT '';
+-- ALTER TABLE public.system_settings ADD COLUMN IF NOT EXISTS gmail_status BOOLEAN DEFAULT TRUE;
+
+-- Enable RLS on system_settings
+ALTER TABLE public.system_settings ENABLE ROW LEVEL SECURITY;
+
+-- System Settings Policies
+CREATE POLICY "Allow public select on system_settings" ON public.system_settings FOR SELECT USING (true);
+CREATE POLICY "Allow admin to update system_settings" ON public.system_settings FOR ALL USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+-- Insert Initial Settings Row
+INSERT INTO public.system_settings (id, gmail_price, gmail_password, fb_price, fb_password, ig_price, ig_password, activation_fee, referral_bonus, min_withdraw, withdraw_fee, banner_url, scrolling_notice, fb_status, ig_status, referral_domain)
+VALUES (1, 10.00, 'GmailPass123', 15.00, 'FBPass123', 12.00, 'IGPass123', 0.00, 5.00, 50.00, 0.00, 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1200&auto=format&fit=crop', 'স্বাগতম টাস্ক টপ মার্কেটিং-এ!', TRUE, TRUE, 'tasktopmarketing.com')
+ON CONFLICT (id) DO NOTHING;
+
+-- Create Storage Bucket for Banners
+INSERT INTO storage.buckets (id, name, public) VALUES ('banners', 'banners', true) ON CONFLICT (id) DO NOTHING;
+
+CREATE POLICY "Banners are publicly accessible" ON storage.objects FOR SELECT USING (bucket_id = 'banners');
+CREATE POLICY "Admin can upload banners" ON storage.objects FOR INSERT WITH CHECK (
+    bucket_id = 'banners' AND EXISTS (
+        SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+-- 4. CREATE SUBMISSIONS TABLE
+CREATE TABLE IF NOT EXISTS public.submissions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+    type TEXT NOT NULL CONSTRAINT type_check CHECK (type IN ('gmail', 'facebook', 'instagram', 'giftcode')),
+    credentials_json JSONB NOT NULL,
+    price_at_submission NUMERIC(10,2) NOT NULL,
+    status TEXT DEFAULT 'Pending' CONSTRAINT status_check CHECK (status IN ('Pending', 'Approved', 'Rejected')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, now()) NOT NULL
+);
+
+-- Enable RLS on submissions
+ALTER TABLE public.submissions ENABLE ROW LEVEL SECURITY;
+
+-- Submissions Policies
+CREATE POLICY "Allow select submissions for owners or admins" ON public.submissions FOR SELECT USING (
+    auth.uid() = user_id OR EXISTS (
+        SELECT 1 FROM public.profiles
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+CREATE POLICY "Allow insert submissions for logged in owners" ON public.submissions FOR INSERT WITH CHECK (
+    auth.uid() = user_id
+);
+
+CREATE POLICY "Allow admin to update submissions" ON public.submissions FOR UPDATE USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+-- 5. CREATE WITHDRAWALS TABLE
+CREATE TABLE IF NOT EXISTS public.withdrawals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+    amount NUMERIC(10,2) NOT NULL CONSTRAINT withdraw_amount_check CHECK (amount >= 50.00),
+    payment_method TEXT NOT NULL,
+    account_number TEXT NOT NULL,
+    status TEXT DEFAULT 'Pending' CONSTRAINT withdraw_status_check CHECK (status IN ('Pending', 'Approved', 'Rejected')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, now()) NOT NULL
+);
+
+-- Enable RLS on withdrawals
+ALTER TABLE public.withdrawals ENABLE ROW LEVEL SECURITY;
+
+-- Withdrawals Policies
+CREATE POLICY "Allow select withdrawals for owners or admins" ON public.withdrawals FOR SELECT USING (
+    auth.uid() = user_id OR EXISTS (
+        SELECT 1 FROM public.profiles
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+CREATE POLICY "Allow insert withdrawals for logged in owners" ON public.withdrawals FOR INSERT WITH CHECK (
+    auth.uid() = user_id
+);
+
+CREATE POLICY "Allow admin to update withdrawals" ON public.withdrawals FOR UPDATE USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+
+-- 6. ATOMIC PostgreSQL FUNCTIONS (RPCs)
+-- Prevents any concurrency / race condition issues on balance updates
+
+-- Approve Submission RPC
+CREATE OR REPLACE FUNCTION public.approve_submission(sub_id UUID, target_user_id UUID, amount NUMERIC)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    updated_rows INTEGER;
+BEGIN
+    UPDATE public.submissions
+    SET status = 'Approved'
+    WHERE id = sub_id AND status = 'Pending';
+    
+    GET DIAGNOSTICS updated_rows = ROW_COUNT;
+    
+    IF updated_rows > 0 THEN
+        UPDATE public.profiles
+        SET wallet_balance = wallet_balance + amount
+        WHERE id = target_user_id;
+        RETURN TRUE;
+    ELSE
+        RETURN FALSE;
+    END IF;
+END;
+$$;
+
+-- Create Withdrawal RPC
+CREATE OR REPLACE FUNCTION public.create_withdrawal(target_user_id UUID, withdraw_amount NUMERIC, method TEXT, account TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    current_balance NUMERIC;
+BEGIN
+    SELECT wallet_balance INTO current_balance
+    FROM public.profiles
+    WHERE id = target_user_id
+    FOR UPDATE;
+    
+    IF current_balance >= withdraw_amount THEN
+        UPDATE public.profiles
+        SET wallet_balance = wallet_balance - withdraw_amount
+        WHERE id = target_user_id;
+        
+        INSERT INTO public.withdrawals (user_id, amount, payment_method, account_number, status)
+        VALUES (target_user_id, withdraw_amount, method, account, 'Pending');
+        
+        RETURN TRUE;
+    ELSE
+        RETURN FALSE;
+    END IF;
+END;
+$$;
+
+-- Reject Withdrawal RPC
+CREATE OR REPLACE FUNCTION public.reject_withdrawal(withdrawal_id UUID, target_user_id UUID, refund_amount NUMERIC)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    updated_rows INTEGER;
+BEGIN
+    UPDATE public.withdrawals
+    SET status = 'Rejected'
+    WHERE id = withdrawal_id AND status = 'Pending';
+    
+    GET DIAGNOSTICS updated_rows = ROW_COUNT;
+    
+    IF updated_rows > 0 THEN
+        UPDATE public.profiles
+        SET wallet_balance = wallet_balance + refund_amount
+        WHERE id = target_user_id;
+        RETURN TRUE;
+    ELSE
+        RETURN FALSE;
+    END IF;
+END;
+$$;
+
+-- 7. AUTH TRIGGER FOR AUTO-PROFILES CREATION
+-- Automatically generates profiles when a user logs in via Google OAuth
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+DECLARE
+    new_referral_code TEXT;
+BEGIN
+    -- Loop to ensure a truly unique 6-character uppercase referral code
+    LOOP
+        new_referral_code := UPPER(SUBSTRING(MD5(RANDOM()::TEXT) FROM 1 FOR 6));
+        EXIT WHEN NOT EXISTS (SELECT 1 FROM public.profiles WHERE referral_code = new_referral_code);
+    END LOOP;
+
+    INSERT INTO public.profiles (
+        id, 
+        email, 
+        full_name, 
+        role, 
+        referral_code, 
+        referred_by, 
+        wallet_balance,
+        phone_number
+    )
+    VALUES (
+        NEW.id,
+        NEW.email,
+        COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'name', SPLIT_PART(NEW.email, '@', 1)),
+        CASE WHEN NEW.email = 'harunurrashid93427@gmail.com' THEN 'admin' ELSE 'user' END,
+        new_referral_code,
+        NULL,
+        0.00,
+        ''
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Recreate trigger
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- ==========================================
+-- USER MANAGEMENT & MICRO JOBS SCHEMA
+-- ==========================================
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN DEFAULT FALSE;
+
+CREATE TABLE IF NOT EXISTS public.micro_jobs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    reward_amount NUMERIC(10,2) NOT NULL DEFAULT 0.00,
+    status BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+ALTER TABLE public.micro_jobs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Enable read access for all users" ON public.micro_jobs FOR SELECT USING (true);
+CREATE POLICY "Enable all access for admins" ON public.micro_jobs FOR ALL USING (
+    EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin')
+);
+
+CREATE TABLE IF NOT EXISTS public.micro_job_submissions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES public.profiles(id) NOT NULL,
+    job_id UUID REFERENCES public.micro_jobs(id) NOT NULL,
+    proof_text TEXT NOT NULL,
+    status TEXT DEFAULT 'Pending' CHECK (status IN ('Pending', 'Approved', 'Rejected')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+ALTER TABLE public.micro_job_submissions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Enable insert for authenticated users" ON public.micro_job_submissions FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Enable read for users own submissions" ON public.micro_job_submissions FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Enable all access for admins" ON public.micro_job_submissions FOR ALL USING (
+    EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin')
+);
+CREATE POLICY "Enable all access for admins on profiles" ON public.profiles FOR ALL USING (
+    EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role = 'admin')
+);
+
+-- ==========================================
+-- ADVANCED GIFT CODE SYSTEM SCHEMA
+-- ==========================================
+CREATE TABLE IF NOT EXISTS public.gift_codes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    code TEXT UNIQUE NOT NULL,
+    reward_amount NUMERIC(10,2) NOT NULL DEFAULT 0.00,
+    max_uses INTEGER NOT NULL DEFAULT 1,
+    current_uses INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+ALTER TABLE public.gift_codes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Enable read access for all users" ON public.gift_codes FOR SELECT USING (true);
+CREATE POLICY "Enable all access for admins" ON public.gift_codes FOR ALL USING (
+    EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin')
+);
+
+CREATE TABLE IF NOT EXISTS public.gift_code_claims (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    code_id UUID REFERENCES public.gift_codes(id) ON DELETE CASCADE NOT NULL,
+    user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+    claimed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(code_id, user_id)
+);
+ALTER TABLE public.gift_code_claims ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Enable insert for authenticated users" ON public.gift_code_claims FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Enable read for users own claims" ON public.gift_code_claims FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Enable all access for admins" ON public.gift_code_claims FOR ALL USING (
+    EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin')
+);
+
+-- Safe Gift Code Claim RPC
+CREATE OR REPLACE FUNCTION public.claim_gift_code_safe(target_user_id UUID, input_code TEXT)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_gift_code RECORD;
+    v_claim_exists BOOLEAN;
+BEGIN
+    -- 1. Fetch the code
+    SELECT * INTO v_gift_code
+    FROM public.gift_codes
+    WHERE code = UPPER(input_code)
+    FOR UPDATE;
+
+    IF v_gift_code IS NULL THEN
+        RETURN json_build_object('success', false, 'error', 'এই গিফট কোডটি ভুল');
+    END IF;
+
+    -- 2. Check limits
+    IF v_gift_code.current_uses >= v_gift_code.max_uses THEN
+        RETURN json_build_object('success', false, 'error', 'এটির লিমিট শেষ হয়ে গেছে');
+    END IF;
+
+    -- 3. Check if already claimed
+    SELECT EXISTS (
+        SELECT 1 FROM public.gift_code_claims
+        WHERE code_id = v_gift_code.id AND user_id = target_user_id
+    ) INTO v_claim_exists;
+
+    IF v_claim_exists THEN
+        RETURN json_build_object('success', false, 'error', 'আপনি ইতিমধ্যে এই কোডটি ব্যবহার করেছেন');
+    END IF;
+
+    -- 4. Update balances and increment usage
+    UPDATE public.profiles
+    SET wallet_balance = wallet_balance + v_gift_code.reward_amount
+    WHERE id = target_user_id;
+
+    UPDATE public.gift_codes
+    SET current_uses = current_uses + 1
+    WHERE id = v_gift_code.id;
+
+    -- 5. Insert claim record
+    INSERT INTO public.gift_code_claims (code_id, user_id)
+    VALUES (v_gift_code.id, target_user_id);
+
+    RETURN json_build_object('success', true, 'reward_amount', v_gift_code.reward_amount);
+END;
+$$;

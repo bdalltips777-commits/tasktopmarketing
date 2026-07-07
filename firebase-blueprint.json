@@ -1,0 +1,67 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User profile with roles and balances.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fullName": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "balance": { "type": "number" },
+        "referralCode": { "type": "string" },
+        "referredBy": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "email", "role", "balance"]
+    },
+    "SystemSettings": {
+      "title": "System Settings",
+      "description": "Global settings.",
+      "type": "object",
+      "properties": {
+        "accountActivationFee": { "type": "number" },
+        "referralBonus": { "type": "number" },
+        "gmailSellPrice": { "type": "number" },
+        "gmailTargetPassword": { "type": "string" },
+        "fbSellPrice": { "type": "number" },
+        "fbTargetPassword": { "type": "string" },
+        "fbStatus": { "type": "boolean" },
+        "igSellPrice": { "type": "number" },
+        "igTargetPassword": { "type": "string" },
+        "igStatus": { "type": "boolean" },
+        "referralDomain": { "type": "string" },
+        "bannerUrl": { "type": "string" }
+      }
+    },
+    "Submission": {
+      "title": "Account Submission",
+      "description": "Submitted account details.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "type": { "type": "string", "enum": ["gmail_sell", "fb_sell", "ig_sell"] },
+        "submittedData": { "type": "object" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["userId", "type", "submittedData", "status"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Users"
+    },
+    "systemSettings/global": {
+      "schema": { "$ref": "#/entities/SystemSettings" },
+      "description": "Global settings"
+    },
+    "submissions/{submissionId}": {
+      "schema": { "$ref": "#/entities/Submission" },
+      "description": "Account submissions"
+    }
+  }
+}
