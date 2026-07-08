@@ -340,7 +340,7 @@ export default function Login() {
                         type="text" 
                         value={referralCode}
                         onChange={e => setReferralCode(e.target.value)}
-                        placeholder="e.g. USER-XXXX"
+                        placeholder="Referred by"
                         className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-11 pr-4 py-3 text-xs sm:text-sm text-slate-100 focus:border-indigo-500 outline-none transition font-bold uppercase"
                       />
                     </div>

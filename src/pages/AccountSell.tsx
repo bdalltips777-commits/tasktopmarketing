@@ -250,7 +250,7 @@ export default function AccountSell() {
                       required 
                       value={formData.fbUid} 
                       onChange={e => setFormData({...formData, fbUid: e.target.value})}
-                      placeholder="Enter your UID"
+                      placeholder="Enter UID"
                       className="w-full bg-slate-950 border border-slate-850 rounded-2xl px-5 py-4 font-mono text-sm text-slate-100 focus:border-indigo-500 outline-none transition-all shadow-inner" 
                     />
                   </div>
@@ -288,7 +288,7 @@ export default function AccountSell() {
                       required 
                       value={formData.igUsername} 
                       onChange={e => setFormData({...formData, igUsername: e.target.value})}
-                      placeholder="Enter your Username"
+                      placeholder="Enter Username"
                       className="w-full bg-slate-950 border border-slate-850 rounded-2xl px-5 py-4 font-mono text-sm text-slate-100 focus:border-indigo-500 outline-none transition-all shadow-inner" 
                     />
                   </div>
@@ -326,7 +326,7 @@ export default function AccountSell() {
                       required 
                       value={formData.gmailAccount} 
                       onChange={e => setFormData({...formData, gmailAccount: e.target.value})}
-                      placeholder="Enter your email address"
+                      placeholder="Enter email address"
                       className="w-full bg-slate-950 border border-slate-850 rounded-2xl px-5 py-4 text-sm text-slate-100 focus:border-indigo-500 outline-none transition-all shadow-inner" 
                     />
                   </div>

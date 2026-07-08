@@ -6,14 +6,16 @@ import { supabase } from '../lib/supabase';
 import { motion } from 'motion/react';
 
 export function getWithdrawalFee(amount: number): number {
-  if (amount >= 2000) return 120;
-  if (amount >= 1000) return 70;
-  if (amount >= 500) return 40;
-  if (amount >= 300) return 35;
-  if (amount >= 200) return 20;
-  if (amount >= 100) return 15;
-  if (amount >= 50) return 10;
-  return 0;
+  const feeMap: Record<number, number> = {
+    50: 10,
+    100: 15,
+    200: 25,
+    300: 35,
+    500: 50,
+    1000: 80,
+    2000: 100
+  };
+  return feeMap[amount] || 0;
 }
 
 export default function Withdraw() {
@@ -28,6 +30,21 @@ export default function Withdraw() {
   const [minWithdraw, setMinWithdraw] = useState(50);
  
   const amounts = ['50', '100', '200', '300', '500', '1000', '2000'];
+
+  const receivableAmount = React.useMemo(() => {
+    const numAmount = Number(amount);
+    const feeMap: Record<number, number> = {
+      50: 10,
+      100: 15,
+      200: 25,
+      300: 35,
+      500: 50,
+      1000: 80,
+      2000: 100
+    };
+    const fee = feeMap[numAmount] || 0;
+    return numAmount - fee;
+  }, [amount]);
 
   useEffect(() => {
     // Fetch min withdraw settings if needed
@@ -157,9 +174,8 @@ export default function Withdraw() {
               ))}
             </div>
             
-            <div className="mt-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-3 flex justify-between items-center">
-              <span className="text-xs text-slate-400">ফি বাদে আপনি পাবেন:</span>
-              <span className="text-sm font-black text-emerald-400">৳{Number(amount) - getWithdrawalFee(Number(amount))}</span>
+            <div className="mt-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-3 text-center">
+              <span className="text-sm font-black text-emerald-400">ফি বাদে আপনি পাবেন: ৳{receivableAmount}</span>
             </div>
           </div>
 

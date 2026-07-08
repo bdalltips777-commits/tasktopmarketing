@@ -400,3 +400,108 @@ BEGIN
     RETURN json_build_object('success', true, 'reward_amount', v_gift_code.reward_amount);
 END;
 $$;
+
+-- ==========================================
+-- REFERRALS SYSTEM UPDATE
+-- ==========================================
+
+-- 1. Create a Referrals Table
+CREATE TABLE IF NOT EXISTS public.referrals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    referrer_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+    referred_user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE UNIQUE NOT NULL,
+    reward_amount NUMERIC(10,2) NOT NULL DEFAULT 5.00,
+    status TEXT DEFAULT 'Pending' CHECK (status IN ('Pending', 'Active', 'Expired')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Enable RLS
+ALTER TABLE public.referrals ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can read own referrals" ON public.referrals FOR SELECT USING (auth.uid() = referrer_id OR auth.uid() = referred_user_id);
+CREATE POLICY "Admins can do everything on referrals" ON public.referrals FOR ALL USING (EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
+
+-- 2. Trigger for Task 1 & Validation (Prevent Expired updates & Credit Balance)
+CREATE OR REPLACE FUNCTION public.process_referral_update()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Strict Validation: Block "Expired" referrals from changing back
+    IF OLD.status = 'Expired' AND NEW.status != 'Expired' THEN
+        RAISE EXCEPTION 'An expired referral cannot be reactivated or set to pending.';
+    END IF;
+
+    -- Update updated_at automatically
+    NEW.updated_at = NOW();
+
+    -- Task 1: Safely add balance when transitioning from Pending to Active
+    IF OLD.status = 'Pending' AND NEW.status = 'Active' THEN
+        UPDATE public.profiles
+        SET wallet_balance = wallet_balance + NEW.reward_amount
+        WHERE id = NEW.referrer_id;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_referral_update ON public.referrals;
+CREATE TRIGGER trigger_referral_update
+BEFORE UPDATE ON public.referrals
+FOR EACH ROW
+EXECUTE FUNCTION public.process_referral_update();
+
+
+-- ==========================================
+-- TASK 2: AUTO-EXPIRE REFERRALS CRON JOB
+-- ==========================================
+-- Note: Requires pg_cron extension enabled in Supabase Dashboard (Database -> Extensions -> pg_cron)
+
+-- Create the function to automatically expire 30-day old pending referrals
+CREATE OR REPLACE FUNCTION public.auto_expire_pending_referrals()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    UPDATE public.referrals
+    SET status = 'Expired', 
+        updated_at = NOW()
+    WHERE status = 'Pending' 
+      AND created_at <= (NOW() - INTERVAL '30 days');
+END;
+$$;
+
+-- Optional: To schedule this in Supabase using pg_cron (if enabled)
+-- SELECT cron.schedule('expire_pending_referrals_daily', '0 0 * * *', 'SELECT public.auto_expire_pending_referrals()');
+CREATE OR REPLACE FUNCTION public.reward_referrer_on_signup()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_bonus NUMERIC(10,2);
+BEGIN
+    -- Check if referred_by was just set
+    IF NEW.referred_by IS NOT NULL THEN
+        -- Only fire on INSERT or when transitioning from NULL to NOT NULL on UPDATE
+        IF (TG_OP = 'INSERT') OR (TG_OP = 'UPDATE' AND OLD.referred_by IS NULL) THEN
+            
+            -- Fetch the referral bonus from system settings
+            SELECT COALESCE(referral_bonus, 0) INTO v_bonus FROM public.system_settings WHERE id = 1;
+            
+            IF v_bonus > 0 THEN
+                -- Add balance to the referrer
+                UPDATE public.profiles 
+                SET wallet_balance = COALESCE(wallet_balance, 0) + v_bonus 
+                WHERE id = NEW.referred_by;
+            END IF;
+            
+        END IF;
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_reward_referrer_on_signup ON public.profiles;
+CREATE TRIGGER trigger_reward_referrer_on_signup
+AFTER INSERT OR UPDATE OF referred_by ON public.profiles
+FOR EACH ROW
+EXECUTE FUNCTION public.reward_referrer_on_signup();
