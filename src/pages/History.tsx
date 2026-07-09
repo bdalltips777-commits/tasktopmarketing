@@ -87,7 +87,7 @@ export default function History() {
                 <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-3">
                   <div className="flex flex-col gap-1">
                     <span className={`px-2.5 py-1 text-[10px] w-max font-black uppercase tracking-wider rounded-md ${
-                      !isSub ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' :
+                      !isSub ? (item.payment_method === 'bKash' ? 'bg-[#E2136E]/10 text-[#E2136E] border border-[#E2136E]/20' : 'bg-orange-500/10 text-orange-400 border border-orange-500/20') :
                       item.type === 'gmail' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
                       item.type === 'facebook' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
                       'bg-pink-500/10 text-pink-400 border border-pink-500/20'

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Settings, Check, X, Loader2, Copy, Shield, Layers, CreditCard, Image as ImageIcon, Calendar, Search, Edit2, Eye, User, Gift } from 'lucide-react';
+import { Settings, Check, X, Loader2, Copy, Shield, Layers, CreditCard, Image as ImageIcon, Calendar, Search, Edit2, Eye, User, Gift, FileText } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Link } from 'react-router-dom';
 import { getWithdrawalFee } from './Withdraw';
@@ -8,7 +8,7 @@ import { formatDateTime } from '../lib/dateUtils';
 
 export default function Admin() {
   const { user, profile } = useAuth();
-  const [activeTab, setActiveTab] = useState<'settings' | 'submissions' | 'withdrawals' | 'users' | 'micro_jobs' | 'gift_codes'>('settings');
+  const [activeTab, setActiveTab] = useState<'settings' | 'submissions' | 'withdrawals' | 'users' | 'micro_jobs' | 'gift_codes' | 'page_rules'>('settings');
   
   const [settings, setSettings] = useState<any>({
     gmail_price: 10.00,
@@ -50,6 +50,12 @@ export default function Admin() {
   const [viewingUserDetails, setViewingUserDetails] = useState<any | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
+  // Page rules states
+  const [pageRules, setPageRules] = useState<{gmail: string, facebook: string, instagram: string}>({
+    gmail: '', facebook: '', instagram: ''
+  });
+  const [savingRules, setSavingRules] = useState(false);
+
   // Confirmation modal states
   const [userToBlock, setUserToBlock] = useState<any | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -73,6 +79,13 @@ export default function Admin() {
         .eq('id', 1)
         .single();
       if (sData && !sErr) setSettings(sData);
+
+      const { data: rulesData } = await supabase.from('page_rules').select('*');
+      if (rulesData) {
+        const rulesMap: any = { gmail: '', facebook: '', instagram: '' };
+        rulesData.forEach(r => { rulesMap[r.page_type] = r.rules_text; });
+        setPageRules(rulesMap);
+      }
 
       const { data: subData, error: subErr } = await supabase
         .from('submissions')
@@ -170,6 +183,25 @@ export default function Admin() {
       alert('Error uploading image: ' + error.message);
     } finally {
       setUploadingImage(false);
+    }
+  };
+
+  const savePageRules = async () => {
+    setSavingRules(true);
+    try {
+      const updates = [
+        { page_type: 'gmail', rules_text: pageRules.gmail, updated_at: new Date().toISOString() },
+        { page_type: 'facebook', rules_text: pageRules.facebook, updated_at: new Date().toISOString() },
+        { page_type: 'instagram', rules_text: pageRules.instagram, updated_at: new Date().toISOString() }
+      ];
+      
+      const { error } = await supabase.from('page_rules').upsert(updates, { onConflict: 'page_type' });
+      if (error) throw error;
+      showToast('Page rules saved successfully!', 'success');
+    } catch (e: any) {
+      showToast(e.message || 'Error saving page rules', 'error');
+    } finally {
+      setSavingRules(false);
     }
   };
 
@@ -448,6 +480,9 @@ export default function Admin() {
           </button>
           <button onClick={() => setActiveTab('gift_codes')} className={`flex-1 py-4 px-6 text-sm font-bold flex items-center justify-center gap-2 whitespace-nowrap transition border-b-2 ${activeTab === 'gift_codes' ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5' : 'border-transparent text-slate-400 hover:text-slate-300 hover:bg-slate-800/50'}`}>
             <Gift className="w-4 h-4" /> Gift Codes
+          </button>
+          <button onClick={() => setActiveTab('page_rules')} className={`flex-1 py-4 px-6 text-sm font-bold flex items-center justify-center gap-2 whitespace-nowrap transition border-b-2 ${activeTab === 'page_rules' ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5' : 'border-transparent text-slate-400 hover:text-slate-300 hover:bg-slate-800/50'}`}>
+            <FileText className="w-4 h-4" /> Page Rules
           </button>
         </div>
       </div>
@@ -1151,6 +1186,65 @@ export default function Admin() {
             </div>
           </div>
         )}
+
+        {/* Tab 7: Page Rules */}
+        {activeTab === 'page_rules' && (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl">
+              <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2 border-b border-slate-800 pb-4">
+                <FileText className="w-5 h-5 text-indigo-400" />
+                Sell Page Rules & Notices
+              </h2>
+              
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-sm font-bold text-slate-300 mb-2">Gmail Sell Page Rules</label>
+                  <textarea 
+                    rows={4}
+                    value={pageRules.gmail} 
+                    onChange={e => setPageRules({...pageRules, gmail: e.target.value})}
+                    placeholder="Enter the rules for the Gmail sell page..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-sm text-slate-200 focus:border-indigo-500 outline-none transition"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-bold text-slate-300 mb-2">Facebook Sell Page Rules</label>
+                  <textarea 
+                    rows={4}
+                    value={pageRules.facebook} 
+                    onChange={e => setPageRules({...pageRules, facebook: e.target.value})}
+                    placeholder="Enter the rules for the Facebook sell page..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-sm text-slate-200 focus:border-indigo-500 outline-none transition"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-bold text-slate-300 mb-2">Instagram Sell Page Rules</label>
+                  <textarea 
+                    rows={4}
+                    value={pageRules.instagram} 
+                    onChange={e => setPageRules({...pageRules, instagram: e.target.value})}
+                    placeholder="Enter the rules for the Instagram sell page..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-sm text-slate-200 focus:border-indigo-500 outline-none transition"
+                  />
+                </div>
+
+                <div className="flex justify-end pt-4 border-t border-slate-800">
+                  <button
+                    onClick={savePageRules}
+                    disabled={savingRules}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition flex items-center gap-2 active:scale-95 disabled:opacity-50"
+                  >
+                    {savingRules ? <Loader2 className="w-5 h-5 animate-spin" /> : <Settings className="w-5 h-5" />}
+                    {savingRules ? 'Saving...' : 'Save Rules'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
 
       {/* Edit Wallet Balance Modal */}

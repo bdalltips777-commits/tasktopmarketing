@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Mail, Facebook, Instagram, Loader2, Info, Copy, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Mail, Facebook, Instagram, Loader2, Info, Copy, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { motion } from 'motion/react';
@@ -22,6 +22,7 @@ export default function AccountSell() {
     fb_status: true,
     ig_status: true
   });
+  const [pageRule, setPageRule] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -56,6 +57,19 @@ export default function AccountSell() {
             fbPassword: isFb ? (data.fb_password || '') : prev.fbPassword,
             igPassword: isIg ? (data.ig_password || '') : prev.igPassword
           }));
+        }
+
+        // Fetch page rules
+        const platformType = isGmail ? 'gmail' : isFb ? 'facebook' : isIg ? 'instagram' : '';
+        if (platformType) {
+          const { data: ruleData } = await supabase
+            .from('page_rules')
+            .select('rules_text')
+            .eq('page_type', platformType)
+            .single();
+          if (ruleData) {
+            setPageRule(ruleData.rules_text);
+          }
         }
       } catch (e) {
         console.error('Error loading global settings:', e);
@@ -236,6 +250,15 @@ export default function AccountSell() {
             {error && (
               <div className="p-4 bg-rose-500/10 border border-rose-500/20 text-rose-300 rounded-2xl text-xs font-bold">
                 {error}
+              </div>
+            )}
+
+            {pageRule && (
+              <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-2xl flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                <div className="text-sm font-medium text-amber-200/90 whitespace-pre-wrap leading-relaxed">
+                  {pageRule}
+                </div>
               </div>
             )}
 
