@@ -110,7 +110,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             balance: newProfileObj.wallet_balance,
             referralCode: newProfileObj.referral_code,
             referredBy: newProfileObj.referred_by,
-            phoneNumber: newProfileObj.phone_number
+            phoneNumber: newProfileObj.phone_number,
+            status: (newProfileObj as any).status || (newProfileObj as any).account_status || 'Active'
           };
         }
         return null;
@@ -160,7 +161,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         referralCode: profileRow.referral_code || '',
         referredBy: profileRow.referred_by || null,
         phoneNumber: profileRow.phone_number || '',
-        isBlocked: false
+        isBlocked: false,
+        status: profileRow.status || profileRow.account_status || 'Active'
       };
     } catch (e: any) {
       console.error('Error in fetchProfileData:', e);
@@ -260,14 +262,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signUpWithEmail = async (email: string, password: string, fullName: string) => {
     setAuthError(null);
     
-    // Fetch IP securely
+    // Fetch IP securely from server-side (Next.js/Express equivalent)
     let ipAddress = '';
     try {
-      const fallback = await fetch('https://api.ipify.org?format=json');
-      const fallbackData = await fallback.json();
-      ipAddress = fallbackData.ip || '';
-    } catch (e2) {
-      console.warn('Could not fetch IP');
+      const res = await fetch('/api/get-ip');
+      const data = await res.json();
+      ipAddress = data.ip || '';
+    } catch (e) {
+      try {
+        const fallback = await fetch('https://api.ipify.org?format=json');
+        const fallbackData = await fallback.json();
+        ipAddress = fallbackData.ip || '';
+      } catch (e2) {
+        console.warn('Could not fetch IP');
+      }
     }
 
     const storedRef = localStorage.getItem('referred_by_code') || '';

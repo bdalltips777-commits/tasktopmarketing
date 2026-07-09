@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Settings, Check, X, Loader2, Copy, Shield, Layers, CreditCard, Image as ImageIcon, Calendar, Search, Edit2, Eye, User, Gift, FileText } from 'lucide-react';
+import { Settings, Check, X, Loader2, Copy, Shield, Layers, CreditCard, Image as ImageIcon, Calendar, Search, Edit2, Eye, User, Gift, FileText, CheckSquare, ShieldAlert } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Link } from 'react-router-dom';
 import { getWithdrawalFee } from './Withdraw';
@@ -8,7 +8,7 @@ import { formatDateTime } from '../lib/dateUtils';
 
 export default function Admin() {
   const { user, profile } = useAuth();
-  const [activeTab, setActiveTab] = useState<'settings' | 'submissions' | 'withdrawals' | 'users' | 'micro_jobs' | 'gift_codes' | 'page_rules' | 'ip_requests'>('settings');
+  const [activeTab, setActiveTab] = useState<'settings' | 'submissions' | 'micro_job_submissions' | 'withdrawals' | 'users' | 'micro_jobs' | 'gift_codes' | 'page_rules' | 'ip_requests'>('settings');
   
   const [settings, setSettings] = useState<any>({
     gmail_price: 10.00,
@@ -33,6 +33,10 @@ export default function Admin() {
   const [withdrawals, setWithdrawals] = useState<any[]>([]);
   const [usersData, setUsersData] = useState<any[]>([]);
   const [microJobs, setMicroJobs] = useState<any[]>([]);
+  const [microJobSubmissions, setMicroJobSubmissions] = useState<any[]>([]);
+  
+  // Tabs for the micro jobs submissions
+  const [microJobSubmissionsTab, setMicroJobSubmissionsTab] = useState<'Pending' | 'Approved' | 'Rejected'>('Pending');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -66,8 +70,12 @@ export default function Admin() {
   const handleApproveIp = async (userId: string) => {
     setActionLoading(true);
     try {
-      const { error } = await supabase.from('profiles').update({ status: 'Active' }).eq('id', userId);
-      if (error) throw error;
+      let { error } = await supabase.from('profiles').update({ status: 'Active' }).eq('id', userId);
+      if (error) {
+        // Fallback if status doesn't exist
+        const { error: err2 } = await supabase.from('profiles').update({ account_status: 'Active' }).eq('id', userId);
+        if (err2) throw err2;
+      }
       setIpRequests(prev => prev.filter(u => u.id !== userId));
       showToast('User approved successfully.', 'success');
     } catch (e: any) {
@@ -117,13 +125,24 @@ export default function Admin() {
         setPageRules(rulesMap);
       }
 
-      const { data: pendingIps } = await supabase
+      let pendingIpsData: any[] = [];
+      const { data: pendingIps, error: pendingIpsErr } = await supabase
         .from('profiles')
         .select('*')
         .eq('status', 'Pending');
-      if (pendingIps) {
-        setIpRequests(pendingIps);
+      
+      if (pendingIps && !pendingIpsErr) {
+        pendingIpsData = pendingIps;
+      } else {
+        const { data: pendingIpsAlt } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('account_status', 'Pending');
+        if (pendingIpsAlt) {
+          pendingIpsData = pendingIpsAlt;
+        }
       }
+      setIpRequests(pendingIpsData);
 
       const { data: subData, error: subErr } = await supabase
         .from('submissions')
@@ -175,6 +194,12 @@ export default function Admin() {
 
       const { data: jobsResponse } = await supabase.from('micro_jobs').select('*').order('created_at', { ascending: false });
       if (jobsResponse) setMicroJobs(jobsResponse);
+
+      const { data: mjsResponse } = await supabase.from('micro_job_submissions').select(`
+        *,
+        micro_jobs ( title, reward_amount )
+      `).order('created_at', { ascending: false });
+      if (mjsResponse) setMicroJobSubmissions(mjsResponse);
 
       const { data: gcResponse } = await supabase.from('gift_codes').select('*').order('created_at', { ascending: false });
       if (gcResponse) setGiftCodes(gcResponse);
@@ -335,6 +360,46 @@ export default function Admin() {
     }
   };
 
+  const handleApproveMicroJobSubmission = async (submission: any) => {
+    setActioningId(submission.id);
+    try {
+      const { data, error } = await supabase.rpc('approve_micro_job_submission_secure', {
+        sub_id: submission.id,
+        target_user_id: submission.user_id
+      });
+
+      if (error) throw new Error(error.message);
+
+      setMicroJobSubmissions(prev => prev.map(s => s.id === submission.id ? { ...s, status: 'Approved' } : s));
+      showToast('Micro Job Submission approved successfully!', 'success');
+    } catch (e: any) {
+      console.error('Error approving micro job submission:', e.message);
+      showToast('Error approving submission: ' + e.message, 'error');
+    } finally {
+      setActioningId(null);
+    }
+  };
+
+  const handleRejectMicroJobSubmission = async (submission: any) => {
+    setActioningId(submission.id);
+    try {
+      const { error } = await supabase
+        .from('micro_job_submissions')
+        .update({ status: 'Rejected' })
+        .eq('id', submission.id);
+
+      if (error) throw new Error(error.message);
+
+      setMicroJobSubmissions(prev => prev.map(s => s.id === submission.id ? { ...s, status: 'Rejected' } : s));
+      showToast('Micro Job Submission rejected successfully!', 'success');
+    } catch (e: any) {
+      console.error('Error rejecting micro job submission:', e.message);
+      showToast('Error rejecting submission: ' + e.message, 'error');
+    } finally {
+      setActioningId(null);
+    }
+  };
+
   const handleApproveWithdrawal = async (id: string) => {
     setActioningId(id);
     try {
@@ -480,6 +545,8 @@ export default function Admin() {
 
   const pendingSubmissionsCount = submissions.filter(s => s.status === 'Pending').length;
   const pendingWithdrawalsCount = withdrawals.filter(w => w.status === 'Pending').length;
+  const pendingMicroJobSubmissionsCount = (microJobSubmissions || []).filter(s => s.status === 'Pending').length;
+  const pendingIpRequestsCount = (ipRequests || []).length;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 font-sans pb-20">
@@ -506,9 +573,17 @@ export default function Admin() {
             <Layers className="w-4 h-4" /> System Submissions
             {pendingSubmissionsCount > 0 && <span className="bg-rose-500 text-white text-[10px] px-2 py-0.5 rounded-full">{pendingSubmissionsCount}</span>}
           </button>
+          <button onClick={() => setActiveTab('micro_job_submissions')} className={`flex-1 py-4 px-6 text-sm font-bold flex items-center justify-center gap-2 whitespace-nowrap transition border-b-2 ${activeTab === 'micro_job_submissions' ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5' : 'border-transparent text-slate-400 hover:text-slate-300 hover:bg-slate-800/50'}`}>
+            <CheckSquare className="w-4 h-4" /> Micro Job Proofs
+            {pendingMicroJobSubmissionsCount > 0 && <span className="bg-rose-500 text-white text-[10px] px-2 py-0.5 rounded-full">{pendingMicroJobSubmissionsCount}</span>}
+          </button>
           <button onClick={() => setActiveTab('withdrawals')} className={`flex-1 py-4 px-6 text-sm font-bold flex items-center justify-center gap-2 whitespace-nowrap transition border-b-2 ${activeTab === 'withdrawals' ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5' : 'border-transparent text-slate-400 hover:text-slate-300 hover:bg-slate-800/50'}`}>
             <CreditCard className="w-4 h-4" /> Withdrawal Requests
             {pendingWithdrawalsCount > 0 && <span className="bg-rose-500 text-white text-[10px] px-2 py-0.5 rounded-full">{pendingWithdrawalsCount}</span>}
+          </button>
+          <button onClick={() => setActiveTab('ip_requests')} className={`flex-1 py-4 px-6 text-sm font-bold flex items-center justify-center gap-2 whitespace-nowrap transition border-b-2 ${activeTab === 'ip_requests' ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5' : 'border-transparent text-slate-400 hover:text-slate-300 hover:bg-slate-800/50'}`}>
+            <ShieldAlert className="w-4 h-4" /> IP Verification
+            {pendingIpRequestsCount > 0 && <span className="bg-amber-500 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full">{pendingIpRequestsCount}</span>}
           </button>
           <button onClick={() => setActiveTab('users')} className={`flex-1 py-4 px-6 text-sm font-bold flex items-center justify-center gap-2 whitespace-nowrap transition border-b-2 ${activeTab === 'users' ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5' : 'border-transparent text-slate-400 hover:text-slate-300 hover:bg-slate-800/50'}`}>
             <Shield className="w-4 h-4" /> User Management
@@ -766,6 +841,70 @@ export default function Admin() {
                       </button>
                       <button 
                         onClick={() => handleRejectSubmission(sub)} 
+                        disabled={actioningId === sub.id}
+                        className="flex-1 md:flex-none bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-600/30 px-4 py-3 rounded-xl transition flex items-center justify-center gap-2 font-bold text-sm"
+                      >
+                        {actioningId === sub.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
+                        রিজেক্ট
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* Tab 2.5: Micro Job Submissions */}
+        {activeTab === 'micro_job_submissions' && (
+          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="flex gap-2 border-b border-slate-800 pb-4">
+              <button onClick={() => setMicroJobSubmissionsTab('Pending')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${microJobSubmissionsTab === 'Pending' ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>Pending</button>
+              <button onClick={() => setMicroJobSubmissionsTab('Approved')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${microJobSubmissionsTab === 'Approved' ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>Approved</button>
+              <button onClick={() => setMicroJobSubmissionsTab('Rejected')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${microJobSubmissionsTab === 'Rejected' ? 'bg-rose-500 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>Rejected</button>
+            </div>
+            {microJobSubmissions.filter(s => s.status === microJobSubmissionsTab).length === 0 ? (
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center">
+                <Check className="w-12 h-12 text-slate-700 mx-auto mb-4" />
+                <h3 className="text-lg font-bold text-slate-400">No {microJobSubmissionsTab.toLowerCase()} micro job submissions</h3>
+              </div>
+            ) : (
+              microJobSubmissions.filter(s => s.status === microJobSubmissionsTab).map((sub) => (
+                <div key={sub.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex flex-col md:flex-row gap-5 hover:border-slate-700 transition">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="px-2.5 py-1 text-[10px] uppercase tracking-wider font-black rounded-full bg-indigo-500/10 text-indigo-400">
+                        Micro Job Proof
+                      </span>
+                      <span className="text-xs font-medium text-slate-400">{new Date(sub.created_at).toLocaleString()}</span>
+                      <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${sub.status === 'Pending' ? 'bg-amber-500/20 text-amber-400' : sub.status === 'Approved' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                        {sub.status}
+                      </span>
+                    </div>
+
+                    <div className="mb-4">
+                      <p className="text-sm text-slate-400 font-bold">Job Title:</p>
+                      <p className="text-sm text-white">{sub.micro_jobs?.title || 'Unknown Job'}</p>
+                      
+                      <p className="text-sm text-slate-400 font-bold mt-2">Proof Details:</p>
+                      <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-800 mt-1 whitespace-pre-wrap text-sm text-slate-200">
+                        {sub.proof_text}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {microJobSubmissionsTab === 'Pending' && (
+                    <div className="flex flex-row md:flex-col justify-end gap-3 border-t border-slate-800 md:border-t-0 pt-4 md:pt-0">
+                      <button 
+                        onClick={() => handleApproveMicroJobSubmission(sub)} 
+                        disabled={actioningId === sub.id}
+                        className="flex-1 md:flex-none bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-600/30 px-4 py-3 rounded-xl transition flex items-center justify-center gap-2 font-bold text-sm"
+                      >
+                        {actioningId === sub.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                        এপ্রুভ
+                      </button>
+                      <button 
+                        onClick={() => handleRejectMicroJobSubmission(sub)} 
                         disabled={actioningId === sub.id}
                         className="flex-1 md:flex-none bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-600/30 px-4 py-3 rounded-xl transition flex items-center justify-center gap-2 font-bold text-sm"
                       >
@@ -1288,44 +1427,57 @@ export default function Admin() {
         {activeTab === 'ip_requests' && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl">
-              <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2 border-b border-slate-800 pb-4">
-                <Shield className="w-5 h-5 text-amber-400" />
-                IP Verification Requests
-              </h2>
+              <div className="border-b border-slate-800 pb-5 mb-6">
+                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                  <ShieldAlert className="w-6 h-6 text-amber-500 animate-pulse" />
+                  Pending Accounts (IP Verification)
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  The following accounts were automatically flagged and set to Pending status due to potential duplicate or matching IP addresses.
+                </p>
+              </div>
               
               {ipRequests.length === 0 ? (
-                <div className="text-center p-10 bg-slate-950 rounded-2xl border border-slate-800">
-                  <p className="text-slate-400">No pending IP verification requests.</p>
+                <div className="text-center p-12 bg-slate-950 rounded-2xl border border-slate-800">
+                  <CheckSquare className="w-12 h-12 text-slate-600 mx-auto mb-4" />
+                  <p className="text-slate-400 font-bold">No pending IP verification requests.</p>
+                  <p className="text-xs text-slate-500 mt-1">All registered accounts are currently active.</p>
                 </div>
               ) : (
-                <div className="space-y-4">
-                  {Object.entries(
-                    ipRequests.reduce((acc, user) => {
-                      const ip = user.ip_address || 'Unknown';
-                      if (!acc[ip]) acc[ip] = [];
-                      acc[ip].push(user);
-                      return acc;
-                    }, {} as Record<string, any[]>)
-                  ).map(([ip, usersInGroup]) => (
-                    <div key={ip} className="bg-slate-950 border border-slate-800 rounded-xl p-5 shadow-inner">
-                      <h3 className="text-sm font-bold text-slate-300 mb-3 flex items-center gap-2">
-                        <span className="bg-amber-500/10 text-amber-500 px-2 py-0.5 rounded-md text-xs border border-amber-500/20">IP: {ip}</span>
-                        <span className="text-slate-500">({usersInGroup.length} Account{usersInGroup.length > 1 ? 's' : ''})</span>
-                      </h3>
-                      
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {usersInGroup.map((u: any) => (
-                          <div key={u.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
-                            <div className="mb-4">
-                              <p className="text-sm font-bold text-white">{u.full_name}</p>
-                              <p className="text-xs text-slate-400">{u.email}</p>
-                              <p className="text-xs text-slate-500 font-mono mt-1">Ref Code: {u.referral_code}</p>
-                            </div>
-                            <div className="flex gap-2">
+                <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950">
+                  {/* Desktop Table View */}
+                  <table className="w-full text-left border-collapse hidden md:table">
+                    <thead>
+                      <tr className="bg-slate-900/80 border-b border-slate-800 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                        <th className="px-6 py-4">User Details</th>
+                        <th className="px-6 py-4">IP Address (Prominent)</th>
+                        <th className="px-6 py-4">Registration Date</th>
+                        <th className="px-6 py-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 text-sm text-slate-300">
+                      {ipRequests.map((u: any) => (
+                        <tr key={u.id} className="hover:bg-slate-900/30 transition">
+                          <td className="px-6 py-4">
+                            <div className="font-bold text-white">{u.full_name}</div>
+                            <div className="text-xs text-slate-400 mt-0.5">{u.email}</div>
+                            <div className="text-[10px] text-slate-500 font-mono mt-1">ID: {u.id}</div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="font-mono bg-amber-500/10 text-amber-400 px-3 py-1.5 rounded-lg border border-amber-500/20 text-sm font-black shadow-sm tracking-wider inline-flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                              {u.ip_address || 'N/A'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-xs text-slate-400">
+                            {u.created_at ? formatDateTime(u.created_at) : 'N/A'}
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex gap-2 justify-end">
                               <button
                                 onClick={() => handleApproveIp(u.id)}
                                 disabled={actionLoading}
-                                className="flex-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 py-2 rounded-lg text-xs font-bold transition flex justify-center items-center gap-1"
+                                className="bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-600/30 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 disabled:opacity-50"
                               >
                                 {actionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                                 Approve
@@ -1333,17 +1485,64 @@ export default function Admin() {
                               <button
                                 onClick={() => handleRejectIp(u.id)}
                                 disabled={actionLoading}
-                                className="flex-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 py-2 rounded-lg text-xs font-bold transition flex justify-center items-center gap-1"
+                                className="bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-600/30 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 disabled:opacity-50"
                               >
                                 {actionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
                                 Reject
                               </button>
                             </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  {/* Mobile Stack View */}
+                  <div className="md:hidden divide-y divide-slate-800">
+                    {ipRequests.map((u: any) => (
+                      <div key={u.id} className="p-5 space-y-4">
+                        <div className="space-y-1">
+                          <div className="text-xs font-black text-slate-500 uppercase tracking-widest">User</div>
+                          <div className="font-bold text-white text-base">{u.full_name}</div>
+                          <div className="text-sm text-slate-400">{u.email}</div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <div className="text-xs font-black text-slate-500 uppercase tracking-widest">IP Address</div>
+                          <div className="inline-block">
+                            <span className="font-mono bg-amber-500/10 text-amber-400 px-3 py-1.5 rounded-lg border border-amber-500/20 text-sm font-black shadow-sm tracking-wider inline-flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                              {u.ip_address || 'N/A'}
+                            </span>
                           </div>
-                        ))}
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="text-xs font-black text-slate-500 uppercase tracking-widest">Registered At</div>
+                          <div className="text-xs text-slate-400">{u.created_at ? formatDateTime(u.created_at) : 'N/A'}</div>
+                        </div>
+
+                        <div className="flex gap-3 pt-2">
+                          <button
+                            onClick={() => handleApproveIp(u.id)}
+                            disabled={actionLoading}
+                            className="flex-1 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-600/30 py-3 rounded-xl text-sm font-bold transition flex justify-center items-center gap-1.5 disabled:opacity-50"
+                          >
+                            {actionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => handleRejectIp(u.id)}
+                            disabled={actionLoading}
+                            className="flex-1 bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-600/30 py-3 rounded-xl text-sm font-bold transition flex justify-center items-center gap-1.5 disabled:opacity-50"
+                          >
+                            {actionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
+                            Reject
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

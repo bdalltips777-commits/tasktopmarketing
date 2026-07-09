@@ -47,7 +47,8 @@ export default function MicroJob() {
       const { error } = await supabase.from('micro_job_submissions').insert({
         user_id: profile.id,
         job_id: jobId,
-        proof_text: proofText
+        proof_text: proofText,
+        status: 'Pending'
       });
 
       if (error) throw new Error(error.message);

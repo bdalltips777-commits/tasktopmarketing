@@ -19,7 +19,7 @@ export default function PendingVerification() {
         </div>
         <h1 className="text-2xl font-black text-white mb-4">Verification Pending</h1>
         <p className="text-slate-400 text-sm leading-relaxed mb-8">
-          You are attempting to create multiple accounts from the same IP address. Your account is currently under pending verification. Admin will review and update shortly.
+          Multiple accounts detected from your IP. Your account is pending admin approval.
         </p>
         <button
           onClick={logout}

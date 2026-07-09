@@ -669,3 +669,96 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+-- Drop old triggers that might have added balance prematurely
+DROP TRIGGER IF EXISTS trigger_reward_referrer_on_signup ON public.profiles;
+
+-- Redefine reward_referrer_on_signup to only create Pending referral
+CREATE OR REPLACE FUNCTION public.reward_referrer_on_signup()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_bonus NUMERIC(10,2);
+BEGIN
+    -- Check if referred_by was just set
+    IF NEW.referred_by IS NOT NULL THEN
+        -- Only fire on INSERT or when transitioning from NULL to NOT NULL on UPDATE
+        IF (TG_OP = 'INSERT') OR (TG_OP = 'UPDATE' AND OLD.referred_by IS NULL) THEN
+            
+            -- Fetch the referral bonus from system settings
+            SELECT COALESCE(referral_bonus, 5.00) INTO v_bonus FROM public.system_settings WHERE id = 1;
+            
+            -- Instead of updating the wallet balance directly, create a Pending referral
+            INSERT INTO public.referrals (referrer_id, referred_user_id, reward_amount, status)
+            VALUES (NEW.referred_by, NEW.id, v_bonus, 'Pending')
+            ON CONFLICT (referred_user_id) DO NOTHING;
+            
+        END IF;
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER trigger_reward_referrer_on_signup
+AFTER INSERT OR UPDATE OF referred_by ON public.profiles
+FOR EACH ROW
+EXECUTE FUNCTION public.reward_referrer_on_signup();
+
+-- Redefine the trigger that activates referral on approval
+CREATE OR REPLACE FUNCTION public.activate_referral_on_approval()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Only trigger when status transitions to 'Approved'
+    IF NEW.status = 'Approved' AND (TG_OP = 'INSERT' OR (TG_OP = 'UPDATE' AND OLD.status != 'Approved')) THEN
+        -- Safely update any 'Pending' referral for this user to 'Active'
+        UPDATE public.referrals
+        SET status = 'Active', updated_at = NOW()
+        WHERE referred_user_id = NEW.user_id 
+          AND status = 'Pending';
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 3. Attach trigger to submissions (e.g., Gmail/FB sell tasks)
+DROP TRIGGER IF EXISTS on_submission_approval_referral ON public.submissions;
+CREATE TRIGGER on_submission_approval_referral
+AFTER INSERT OR UPDATE OF status ON public.submissions
+FOR EACH ROW
+EXECUTE FUNCTION public.activate_referral_on_approval();
+
+-- 4. Attach trigger to micro_job_submissions
+DROP TRIGGER IF EXISTS on_micro_job_submission_approval_referral ON public.micro_job_submissions;
+CREATE TRIGGER on_micro_job_submission_approval_referral
+AFTER INSERT OR UPDATE OF status ON public.micro_job_submissions
+FOR EACH ROW
+EXECUTE FUNCTION public.activate_referral_on_approval();
+
+-- 5. Redefine process_referral_update to actually add balance
+CREATE OR REPLACE FUNCTION public.process_referral_update()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Strict Validation: Block "Expired" referrals from changing back
+    IF OLD.status = 'Expired' AND NEW.status != 'Expired' THEN
+        RAISE EXCEPTION 'An expired referral cannot be reactivated or set to pending.';
+    END IF;
+
+    -- Update updated_at automatically
+    NEW.updated_at = NOW();
+
+    -- Task 1: Safely add balance when transitioning from Pending to Active
+    IF OLD.status = 'Pending' AND NEW.status = 'Active' THEN
+        UPDATE public.profiles
+        SET wallet_balance = COALESCE(wallet_balance, 0) + NEW.reward_amount
+        WHERE id = NEW.referrer_id;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_referral_update ON public.referrals;
+CREATE TRIGGER trigger_referral_update
+BEFORE UPDATE ON public.referrals
+FOR EACH ROW
+EXECUTE FUNCTION public.process_referral_update();
