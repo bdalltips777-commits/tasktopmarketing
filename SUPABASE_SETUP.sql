@@ -530,3 +530,142 @@ INSERT INTO public.page_rules (page_type, rules_text) VALUES
 ('facebook', 'এখানে ফেসবুক সেলের নিয়মাবলী লিখুন...'),
 ('instagram', 'এখানে ইনস্টাগ্রাম সেলের নিয়মাবলী লিখুন...')
 ON CONFLICT (page_type) DO NOTHING;
+-- ========================================================
+-- RESTRUCTURED REFERRAL LOGIC (STRICT APPROVAL ACTIVATION)
+-- ========================================================
+
+-- 1. Redefine the signup trigger to ONLY create a 'Pending' referral (no instant balance)
+CREATE OR REPLACE FUNCTION public.reward_referrer_on_signup()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_bonus NUMERIC(10,2);
+BEGIN
+    -- Check if referred_by was just set
+    IF NEW.referred_by IS NOT NULL THEN
+        -- Only fire on INSERT or when transitioning from NULL to NOT NULL on UPDATE
+        IF (TG_OP = 'INSERT') OR (TG_OP = 'UPDATE' AND OLD.referred_by IS NULL) THEN
+            
+            -- Fetch the referral bonus from system settings
+            SELECT COALESCE(referral_bonus, 5.00) INTO v_bonus FROM public.system_settings WHERE id = 1;
+            
+            -- Instead of updating the wallet balance directly, create a Pending referral
+            INSERT INTO public.referrals (referrer_id, referred_user_id, reward_amount, status)
+            VALUES (NEW.referred_by, NEW.id, v_bonus, 'Pending')
+            ON CONFLICT (referred_user_id) DO NOTHING;
+            
+        END IF;
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 2. Function to activate a pending referral upon job approval
+CREATE OR REPLACE FUNCTION public.activate_referral_on_approval()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Only trigger when status transitions to 'Approved'
+    IF NEW.status = 'Approved' AND (TG_OP = 'INSERT' OR (TG_OP = 'UPDATE' AND OLD.status != 'Approved')) THEN
+        -- Safely update any 'Pending' referral for this user to 'Active'
+        -- This triggers the existing 'process_referral_update' on the 'referrals' table 
+        -- which actually adds the balance to the referrer inside a transaction.
+        UPDATE public.referrals
+        SET status = 'Active', updated_at = NOW()
+        WHERE referred_user_id = NEW.user_id 
+          AND status = 'Pending';
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 3. Attach trigger to submissions (e.g., Gmail/FB sell tasks)
+DROP TRIGGER IF EXISTS on_submission_approval_referral ON public.submissions;
+CREATE TRIGGER on_submission_approval_referral
+AFTER INSERT OR UPDATE OF status ON public.submissions
+FOR EACH ROW
+EXECUTE FUNCTION public.activate_referral_on_approval();
+
+-- 4. Attach trigger to micro_job_submissions (if applicable)
+DROP TRIGGER IF EXISTS on_micro_job_submission_approval_referral ON public.micro_job_submissions;
+CREATE TRIGGER on_micro_job_submission_approval_referral
+AFTER INSERT OR UPDATE OF status ON public.micro_job_submissions
+FOR EACH ROW
+EXECUTE FUNCTION public.activate_referral_on_approval();
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS ip_address TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Active' CHECK (status IN ('Active', 'Pending'));
+
+CREATE OR REPLACE FUNCTION public.delete_rejected_user(target_user_id UUID)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    -- Only allow admins
+    IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin') THEN
+        RAISE EXCEPTION 'Not authorized';
+    END IF;
+
+    -- Delete from auth.users (this cascades to profiles and everything else)
+    DELETE FROM auth.users WHERE id = target_user_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+DECLARE
+    new_referral_code TEXT;
+    extracted_ip TEXT;
+    ip_status TEXT := 'Active';
+    ref_by UUID := NULL;
+    ref_code TEXT;
+BEGIN
+    -- Loop to ensure a truly unique 6-character uppercase referral code
+    LOOP
+        new_referral_code := UPPER(SUBSTRING(MD5(RANDOM()::TEXT) FROM 1 FOR 6));
+        EXIT WHEN NOT EXISTS (SELECT 1 FROM public.profiles WHERE referral_code = new_referral_code);
+    END LOOP;
+
+    -- Extract IP Address from metadata
+    extracted_ip := NEW.raw_user_meta_data->>'ip_address';
+
+    -- Check if IP exists
+    IF extracted_ip IS NOT NULL AND extracted_ip != '' THEN
+        IF EXISTS (SELECT 1 FROM public.profiles WHERE ip_address = extracted_ip) THEN
+            ip_status := 'Pending';
+        END IF;
+    END IF;
+
+    -- Extract referral code safely
+    ref_code := NEW.raw_user_meta_data->>'referral_code';
+    IF ref_code IS NOT NULL AND ref_code != '' THEN
+        SELECT id INTO ref_by FROM public.profiles WHERE referral_code = ref_code;
+    END IF;
+
+    INSERT INTO public.profiles (
+        id, 
+        email, 
+        full_name, 
+        role, 
+        referral_code, 
+        referred_by, 
+        wallet_balance,
+        phone_number,
+        ip_address,
+        status
+    )
+    VALUES (
+        NEW.id,
+        NEW.email,
+        COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'name', SPLIT_PART(NEW.email, '@', 1)),
+        CASE WHEN NEW.email = 'harunurrashid93427@gmail.com' THEN 'admin' ELSE 'user' END,
+        new_referral_code,
+        ref_by,
+        0.00,
+        COALESCE(NEW.raw_user_meta_data->>'phone_number', ''),
+        extracted_ip,
+        ip_status
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;

@@ -259,12 +259,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUpWithEmail = async (email: string, password: string, fullName: string) => {
     setAuthError(null);
+    
+    // Fetch IP securely
+    let ipAddress = '';
+    try {
+      const fallback = await fetch('https://api.ipify.org?format=json');
+      const fallbackData = await fallback.json();
+      ipAddress = fallbackData.ip || '';
+    } catch (e2) {
+      console.warn('Could not fetch IP');
+    }
+
+    const storedRef = localStorage.getItem('referred_by_code') || '';
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
           full_name: fullName,
+          ip_address: ipAddress,
+          referral_code: storedRef,
         }
       }
     });
@@ -277,22 +292,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (data.user) {
       const userId = data.user.id;
       
-      // Let's check for referral code in local storage
-      let referredBy: string | null = null;
-      const storedRef = localStorage.getItem('referred_by_code');
-      if (storedRef) {
-        try {
-          const { data: referrer } = await supabase
-            .from('profiles')
-            .select('id')
-            .eq('referral_code', storedRef);
-          if (referrer && referrer.length > 0 && referrer[0].id !== userId) {
-            referredBy = referrer[0].id;
-          }
-        } catch (e) {
-          console.error('Error fetching referrer during signup:', e);
-        }
-      }
+      // We no longer need to manually update referred_by on the client side since the handle_new_user trigger handles it via raw_user_meta_data.
+      // But we will refresh the profile.
 
       try {
         const { data: profilesList } = await supabase
@@ -301,28 +302,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .eq('id', userId);
 
         if (profilesList && profilesList.length > 0) {
-          const existingProfile = profilesList[0];
-          if (referredBy && !existingProfile.referred_by) {
-            await supabase
-              .from('profiles')
-              .update({ referred_by: referredBy })
-              .eq('id', userId);
-          }
-        } else {
-          // Fallback manual insert
-          const role = email.toLowerCase() === 'harunurrashid93427@gmail.com' ? 'admin' : 'user';
-          const refCode = generateReferralCode();
-          const newProfileObj = {
-            id: userId,
-            email: email,
-            full_name: fullName,
-            role: role,
-            wallet_balance: 0.00,
-            referral_code: refCode,
-            referred_by: referredBy,
-            phone_number: ''
-          };
-          await supabase.from('profiles').insert(newProfileObj);
+          setProfile(profilesList[0]);
         }
       } catch (e) {
         console.error('Error synchronizing profiles table:', e);

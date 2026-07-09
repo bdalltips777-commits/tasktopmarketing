@@ -12,6 +12,7 @@ import Refer from './pages/Refer';
 import Profile from './pages/Profile';
 import Withdraw from './pages/Withdraw';
 import History from './pages/History';
+import PendingVerification from './pages/PendingVerification';
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Login />} />
+          <Route path="/pending-verification" element={<PendingVerification />} />
           
           <Route element={<ProtectedRoute />}>
             <Route path="/" element={<Dashboard />} />
