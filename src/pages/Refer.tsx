@@ -27,21 +27,18 @@ export default function Refer() {
         if (sData) setSettings(sData);
 
         if (profile?.id) {
-          const { data: refUsers } = await supabase
-            .from('profiles')
-            .select('id, full_name, email')
-            .eq('referred_by', profile.id);
+          const { data: refData } = await supabase
+            .from('referrals')
+            .select(`
+              status,
+              referred_user:referred_user_id ( id, full_name, email )
+            `)
+            .eq('referrer_id', profile.id)
+            .order('created_at', { ascending: false });
             
-          if (refUsers && refUsers.length > 0) {
-            const userIds = refUsers.map(u => u.id);
-            const { data: subs } = await supabase
-              .from('submissions')
-              .select('user_id, type')
-              .in('user_id', userIds)
-              .eq('type', 'gmail');
-              
-            const usersWithStatus = refUsers.map(u => {
-              const hasGmail = subs?.some(s => s.user_id === u.id);
+          if (refData && refData.length > 0) {
+            const mappedUsers = refData.map((r: any) => {
+              const u = r.referred_user || {};
               const maskEmail = (email: string) => {
                 if (!email) return '';
                 const parts = email.split('@');
@@ -49,12 +46,12 @@ export default function Refer() {
                 return parts[0].substring(0, 3) + '***@' + parts[1];
               };
               return {
-                ...u,
+                full_name: u.full_name,
                 maskedEmail: maskEmail(u.email),
-                status: hasGmail ? 'Active' : 'Pending'
+                status: r.status
               };
             });
-            setReferredUsers(usersWithStatus);
+            setReferredUsers(mappedUsers);
           }
         }
       } catch (e) {

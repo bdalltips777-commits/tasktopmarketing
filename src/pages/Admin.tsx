@@ -322,13 +322,73 @@ export default function Admin() {
   const handleApproveSubmission = async (submission: any) => {
     setActioningId(submission.id);
     try {
-      const { data, error } = await supabase.rpc('approve_submission', {
-        sub_id: submission.id,
-        target_user_id: submission.user_id,
-        amount: submission.price_at_submission
-      });
+      // 1. Update the job status to 'Approved'
+      const { data: updateData, error: updateError } = await supabase
+        .from('submissions')
+        .update({ status: 'Approved', updated_at: new Date().toISOString() })
+        .eq('id', submission.id)
+        .eq('status', 'Pending')
+        .select();
+      
+      if (updateError) throw updateError;
+      if (!updateData || updateData.length === 0) {
+        throw new Error('Submission was already processed or could not be found.');
+      }
 
-      if (error) throw new Error(error.message);
+      // 2. Add Task Price to User
+      const { data: userProfile } = await supabase
+        .from('profiles')
+        .select('wallet_balance')
+        .eq('id', submission.user_id)
+        .single();
+        
+      if (userProfile) {
+        await supabase
+          .from('profiles')
+          .update({ wallet_balance: Number(userProfile.wallet_balance) + Number(submission.price_at_submission) })
+          .eq('id', submission.user_id);
+      }
+
+      // 3. Handle Referral Activation
+      const { data: pendingRef } = await supabase
+        .from('referrals')
+        .select('*')
+        .eq('referred_user_id', submission.user_id)
+        .eq('status', 'Pending')
+        .single();
+
+      if (pendingRef) {
+        // Fetch current dynamic referral bonus
+        const { data: settings } = await supabase
+          .from('system_settings')
+          .select('referral_bonus')
+          .eq('id', 1)
+          .single();
+          
+        const currentBonus = settings?.referral_bonus || 5.00;
+
+        // Update referral to Active with current bonus
+        const { error: refError } = await supabase
+          .from('referrals')
+          .update({ status: 'Active', reward_amount: currentBonus, updated_at: new Date().toISOString() })
+          .eq('id', pendingRef.id);
+          
+        if (!refError) {
+          // Add bonus to Referrer
+          const { data: referrerProfile } = await supabase
+            .from('profiles')
+            .select('wallet_balance')
+            .eq('id', pendingRef.referrer_id)
+            .single();
+            
+          if (referrerProfile) {
+            await supabase
+              .from('profiles')
+              .update({ wallet_balance: Number(referrerProfile.wallet_balance) + Number(currentBonus) })
+              .eq('id', pendingRef.referrer_id);
+          }
+        }
+      }
 
       setSubmissions(prev => prev.map(s => s.id === submission.id ? { ...s, status: 'Approved' } : s));
       showToast('Submission approved successfully!', 'success');
@@ -363,12 +423,84 @@ export default function Admin() {
   const handleApproveMicroJobSubmission = async (submission: any) => {
     setActioningId(submission.id);
     try {
-      const { data, error } = await supabase.rpc('approve_micro_job_submission_secure', {
-        sub_id: submission.id,
-        target_user_id: submission.user_id
-      });
+      // 1. Get the reward amount for the job this submission belongs to
+      const { data: jobData, error: jobError } = await supabase
+        .from('micro_jobs')
+        .select('reward_amount')
+        .eq('id', submission.job_id)
+        .single();
+        
+      if (jobError || !jobData) throw new Error('Could not find job reward amount');
+      
+      const jobReward = jobData.reward_amount;
 
-      if (error) throw new Error(error.message);
+      // 2. Update the submission
+      const { data: updateData, error: updateError } = await supabase
+        .from('micro_job_submissions')
+        .update({ status: 'Approved' })
+        .eq('id', submission.id)
+        .eq('status', 'Pending')
+        .select();
+      
+      if (updateError) throw updateError;
+      if (!updateData || updateData.length === 0) {
+        throw new Error('Submission was already processed or could not be found.');
+      }
+
+      // 3. Add Task Price to User
+      const { data: userProfile } = await supabase
+        .from('profiles')
+        .select('wallet_balance')
+        .eq('id', submission.user_id)
+        .single();
+        
+      if (userProfile) {
+        await supabase
+          .from('profiles')
+          .update({ wallet_balance: Number(userProfile.wallet_balance) + Number(jobReward) })
+          .eq('id', submission.user_id);
+      }
+
+      // 4. Handle Referral Activation
+      const { data: pendingRef } = await supabase
+        .from('referrals')
+        .select('*')
+        .eq('referred_user_id', submission.user_id)
+        .eq('status', 'Pending')
+        .single();
+
+      if (pendingRef) {
+        // Fetch current dynamic referral bonus
+        const { data: settings } = await supabase
+          .from('system_settings')
+          .select('referral_bonus')
+          .eq('id', 1)
+          .single();
+          
+        const currentBonus = settings?.referral_bonus || 5.00;
+
+        // Update referral to Active with current bonus
+        const { error: refError } = await supabase
+          .from('referrals')
+          .update({ status: 'Active', reward_amount: currentBonus, updated_at: new Date().toISOString() })
+          .eq('id', pendingRef.id);
+          
+        if (!refError) {
+          // Add bonus to Referrer
+          const { data: referrerProfile } = await supabase
+            .from('profiles')
+            .select('wallet_balance')
+            .eq('id', pendingRef.referrer_id)
+            .single();
+            
+          if (referrerProfile) {
+            await supabase
+              .from('profiles')
+              .update({ wallet_balance: Number(referrerProfile.wallet_balance) + Number(currentBonus) })
+              .eq('id', pendingRef.referrer_id);
+          }
+        }
+      }
 
       setMicroJobSubmissions(prev => prev.map(s => s.id === submission.id ? { ...s, status: 'Approved' } : s));
       showToast('Micro Job Submission approved successfully!', 'success');
@@ -547,6 +679,22 @@ export default function Admin() {
   const pendingWithdrawalsCount = withdrawals.filter(w => w.status === 'Pending').length;
   const pendingMicroJobSubmissionsCount = (microJobSubmissions || []).filter(s => s.status === 'Pending').length;
   const pendingIpRequestsCount = (ipRequests || []).length;
+  
+  // Find duplicate IPs for highlighting
+  const ipCounts = ipRequests.reduce((acc: any, curr: any) => {
+    if (curr.ip_address) {
+      acc[curr.ip_address] = (acc[curr.ip_address] || 0) + 1;
+    }
+    return acc;
+  }, {});
+  const duplicateIps = new Set(Object.keys(ipCounts).filter(ip => ipCounts[ip] > 1));
+  
+  // Sort ipRequests by IP to group identical IPs together
+  const sortedIpRequests = [...(ipRequests || [])].sort((a, b) => {
+    if (!a.ip_address) return 1;
+    if (!b.ip_address) return -1;
+    return a.ip_address.localeCompare(b.ip_address);
+  });
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 font-sans pb-20">
@@ -1456,16 +1604,21 @@ export default function Admin() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 text-sm text-slate-300">
-                      {ipRequests.map((u: any) => (
-                        <tr key={u.id} className="hover:bg-slate-900/30 transition">
+                      {sortedIpRequests.map((u: any) => {
+                        const isDuplicate = u.ip_address && duplicateIps.has(u.ip_address);
+                        return (
+                        <tr key={u.id} className={`transition ${isDuplicate ? 'bg-rose-950/20 hover:bg-rose-950/40 border-l-2 border-l-rose-500' : 'hover:bg-slate-900/30 border-l-2 border-l-transparent'}`}>
                           <td className="px-6 py-4">
-                            <div className="font-bold text-white">{u.full_name}</div>
+                            <div className="font-bold text-white flex items-center gap-2">
+                              {u.full_name}
+                              {isDuplicate && <span className="bg-rose-500/20 text-rose-400 text-[10px] px-1.5 py-0.5 rounded uppercase font-black tracking-widest">Duplicate IP</span>}
+                            </div>
                             <div className="text-xs text-slate-400 mt-0.5">{u.email}</div>
                             <div className="text-[10px] text-slate-500 font-mono mt-1">ID: {u.id}</div>
                           </td>
                           <td className="px-6 py-4">
-                            <span className="font-mono bg-amber-500/10 text-amber-400 px-3 py-1.5 rounded-lg border border-amber-500/20 text-sm font-black shadow-sm tracking-wider inline-flex items-center gap-1.5">
-                              <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                            <span className={`font-mono px-3 py-1.5 rounded-lg border text-sm font-black shadow-sm tracking-wider inline-flex items-center gap-1.5 ${isDuplicate ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
+                              <span className={`w-2 h-2 rounded-full animate-ping ${isDuplicate ? 'bg-rose-500' : 'bg-amber-500'}`}></span>
                               {u.ip_address || 'N/A'}
                             </span>
                           </td>
@@ -1493,16 +1646,21 @@ export default function Admin() {
                             </div>
                           </td>
                         </tr>
-                      ))}
+                      ); })}
                     </tbody>
                   </table>
 
                   {/* Mobile Stack View */}
                   <div className="md:hidden divide-y divide-slate-800">
-                    {ipRequests.map((u: any) => (
-                      <div key={u.id} className="p-5 space-y-4">
+                    {sortedIpRequests.map((u: any) => {
+                      const isDuplicate = u.ip_address && duplicateIps.has(u.ip_address);
+                      return (
+                      <div key={u.id} className={`p-5 space-y-4 transition ${isDuplicate ? 'bg-rose-950/20' : ''}`}>
                         <div className="space-y-1">
-                          <div className="text-xs font-black text-slate-500 uppercase tracking-widest">User</div>
+                          <div className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center justify-between">
+                            User
+                            {isDuplicate && <span className="bg-rose-500/20 text-rose-400 text-[10px] px-1.5 py-0.5 rounded uppercase font-black tracking-widest">Duplicate</span>}
+                          </div>
                           <div className="font-bold text-white text-base">{u.full_name}</div>
                           <div className="text-sm text-slate-400">{u.email}</div>
                         </div>
@@ -1510,8 +1668,8 @@ export default function Admin() {
                         <div className="space-y-1.5">
                           <div className="text-xs font-black text-slate-500 uppercase tracking-widest">IP Address</div>
                           <div className="inline-block">
-                            <span className="font-mono bg-amber-500/10 text-amber-400 px-3 py-1.5 rounded-lg border border-amber-500/20 text-sm font-black shadow-sm tracking-wider inline-flex items-center gap-1.5">
-                              <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                            <span className={`font-mono px-3 py-1.5 rounded-lg border text-sm font-black shadow-sm tracking-wider inline-flex items-center gap-1.5 ${isDuplicate ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
+                              <span className={`w-2 h-2 rounded-full animate-ping ${isDuplicate ? 'bg-rose-500' : 'bg-amber-500'}`}></span>
                               {u.ip_address || 'N/A'}
                             </span>
                           </div>
@@ -1541,7 +1699,8 @@ export default function Admin() {
                           </button>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
