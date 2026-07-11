@@ -18,10 +18,6 @@ export function ProtectedRoute({ requireAdmin = false }: { requireAdmin?: boolea
     return <Navigate to="/login" replace />;
   }
 
-  if (profile?.status === 'Pending') {
-    return <Navigate to="/pending-verification" replace />;
-  }
-
   if (requireAdmin && profile?.role !== 'admin') {
     return <Navigate to="/" replace />;
   }
