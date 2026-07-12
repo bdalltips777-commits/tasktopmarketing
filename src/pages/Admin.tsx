@@ -259,13 +259,83 @@ export default function Admin() {
   const handleApproveSubmission = async (submission: any) => {
     setActioningId(submission.id);
     try {
-      const { data, error } = await supabase.rpc('approve_submission', {
-        sub_id: submission.id,
-        target_user_id: submission.user_id,
-        amount: submission.price_at_submission
-      });
+      const { error: updateSubError } = await supabase
+        .from('submissions')
+        .update({ status: 'Approved' })
+        .eq('id', submission.id)
+        .eq('status', 'Pending');
+      
+      if (updateSubError) throw new Error(updateSubError.message);
 
-      if (error) throw new Error(error.message);
+      const { data: userProfile } = await supabase
+        .from('profiles')
+        .select('wallet_balance')
+        .eq('id', submission.user_id)
+        .single();
+
+      if (userProfile) {
+        const newBalance = Number(userProfile.wallet_balance || 0) + Number(submission.price_at_submission);
+        const { error: updateProfileError } = await supabase
+          .from('profiles')
+          .update({ wallet_balance: newBalance })
+          .eq('id', submission.user_id);
+          
+        if (updateProfileError) {
+          console.error("Failed to update wallet balance:", updateProfileError);
+        }
+      }
+
+      // One-Chance Referral Trigger Direct
+      // Check if there is a pending referral record in the referrals table
+      let pendingReferral = null;
+      const { data: pendingReferrals, error: refError } = await supabase
+        .from('referrals')
+        .select('*')
+        .eq('referred_user_id', submission.user_id)
+        .eq('status', 'Pending');
+
+      if (!refError && pendingReferrals && pendingReferrals.length > 0) {
+        pendingReferral = pendingReferrals[0];
+      } else {
+        // If not found in referrals table, check if the user has a referred_by in their profile
+        // and create a pending referral record retroactively to process it.
+        const { data: userProfile } = await supabase
+          .from('profiles')
+          .select('referred_by')
+          .eq('id', submission.user_id)
+          .single();
+          
+        if (userProfile?.referred_by) {
+           // Ensure it hasn't already been processed (no record in referrals means it hasn't)
+           // Create it now so we can process it
+           const { data: newRef } = await supabase
+             .from('referrals')
+             .insert({
+                referrer_id: userProfile.referred_by,
+                referred_user_id: submission.user_id,
+                status: 'Pending'
+             })
+             .select()
+             .single();
+             
+           if (newRef) {
+             pendingReferral = newRef;
+           }
+        }
+      }
+
+      if (pendingReferral) {
+        const { error: updateError } = await supabase
+          .from('referrals')
+          .update({ status: 'Active' })
+          .eq('referred_user_id', submission.user_id)
+          .eq('status', 'Pending');
+          
+        if (updateError) {
+           console.error("Failed to update referral to Active:", updateError);
+           // Even if it fails (e.g. missing trigger), don't break the submission approval
+        }
+      }
 
       setSubmissions(prev => prev.map(s => s.id === submission.id ? { ...s, status: 'Approved' } : s));
       showToast('Submission approved successfully!', 'success');
@@ -286,6 +356,52 @@ export default function Admin() {
         .eq('id', submission.id);
 
       if (error) throw new Error(error.message);
+
+      // One-Chance Referral Trigger Direct - Expire
+      let pendingReferral = null;
+      const { data: pendingReferrals, error: refError } = await supabase
+        .from('referrals')
+        .select('*')
+        .eq('referred_user_id', submission.user_id)
+        .eq('status', 'Pending');
+
+      if (!refError && pendingReferrals && pendingReferrals.length > 0) {
+        pendingReferral = pendingReferrals[0];
+      } else {
+        const { data: userProfile } = await supabase
+          .from('profiles')
+          .select('referred_by')
+          .eq('id', submission.user_id)
+          .single();
+          
+        if (userProfile?.referred_by) {
+           const { data: newRef } = await supabase
+             .from('referrals')
+             .insert({
+                referrer_id: userProfile.referred_by,
+                referred_user_id: submission.user_id,
+                status: 'Pending'
+             })
+             .select()
+             .single();
+             
+           if (newRef) {
+             pendingReferral = newRef;
+           }
+        }
+      }
+
+      if (pendingReferral) {
+        const { error: updateError } = await supabase
+          .from('referrals')
+          .update({ status: 'Expired' })
+          .eq('referred_user_id', submission.user_id)
+          .eq('status', 'Pending');
+          
+        if (updateError) {
+          console.error("Failed to update referral to Expired:", updateError);
+        }
+      }
 
       setSubmissions(prev => prev.map(s => s.id === submission.id ? { ...s, status: 'Rejected' } : s));
       showToast('Submission rejected successfully!', 'success');
@@ -346,9 +462,29 @@ export default function Admin() {
         const { error: updateError } = await supabase
           .from('withdrawals')
           .update({ status: 'Rejected' })
-          .eq('id', withd.id);
+          .eq('id', withd.id)
+          .eq('status', 'Pending');
 
         if (updateError) throw new Error(updateError.message);
+        
+        // Refund the balance directly
+        const { data: userProfile } = await supabase
+          .from('profiles')
+          .select('wallet_balance')
+          .eq('id', withd.user_id)
+          .single();
+
+        if (userProfile) {
+          const newBalance = Number(userProfile.wallet_balance || 0) + Number(withd.amount);
+          const { error: updateProfileError } = await supabase
+            .from('profiles')
+            .update({ wallet_balance: newBalance })
+            .eq('id', withd.user_id);
+            
+          if (updateProfileError) {
+             console.error("Failed to refund wallet balance:", updateProfileError);
+          }
+        }
 
         setWithdrawals(prev => prev.map(w => w.id === withd.id ? { ...w, status: 'Rejected' } : w));
         showToast('Withdrawal rejected! (direct fallback)', 'success');
@@ -699,7 +835,15 @@ export default function Admin() {
                       )}
                       {sub.type === 'facebook' && (
                         <div className="space-y-1">
-                          <p className="flex items-center gap-2"><span className="text-indigo-400">Number/Email:</span> {sub.credentials_json.identifier || sub.credentials_json.fbUid} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(sub.credentials_json.identifier || sub.credentials_json.fbUid)} /></p>
+                          {sub.credentials_json.fbUid && (
+                            <p className="flex items-center gap-2"><span className="text-indigo-400">User ID (UID):</span> {sub.credentials_json.fbUid} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(sub.credentials_json.fbUid)} /></p>
+                          )}
+                          {sub.credentials_json.emailPhone && (
+                            <p className="flex items-center gap-2"><span className="text-indigo-400">Email/Phone:</span> {sub.credentials_json.emailPhone} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(sub.credentials_json.emailPhone)} /></p>
+                          )}
+                          {!sub.credentials_json.fbUid && !sub.credentials_json.emailPhone && (
+                            <p className="flex items-center gap-2"><span className="text-indigo-400">Number/Email:</span> {sub.credentials_json.identifier || sub.credentials_json.fbUid} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(sub.credentials_json.identifier || sub.credentials_json.fbUid)} /></p>
+                          )}
                           <p className="flex items-center gap-2"><span className="text-indigo-400">Password:</span> {sub.credentials_json.password || sub.credentials_json.fbPassword} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(sub.credentials_json.password || sub.credentials_json.fbPassword)} /></p>
                           {(sub.credentials_json.twoFAKey || sub.credentials_json.fb2FA) && <p className="flex items-center gap-2"><span className="text-indigo-400">2FA Key:</span> {sub.credentials_json.twoFAKey || sub.credentials_json.fb2FA} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(sub.credentials_json.twoFAKey || sub.credentials_json.fb2FA)} /></p>}
                           <p><span className="text-indigo-400">Profile Link:</span> {sub.credentials_json.profileLink || `https://facebook.com/profile.php?id=${sub.credentials_json.fbUid || sub.credentials_json.identifier}`}</p>

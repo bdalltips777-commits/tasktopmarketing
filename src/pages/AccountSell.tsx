@@ -31,6 +31,7 @@ export default function AccountSell() {
     gmailAccount: '',
     gmailPassword: '',
     fbUid: '',
+    fbEmailPhone: '',
     fbPassword: '',
     fb2FA: '',
     igUsername: '',
@@ -96,7 +97,9 @@ export default function AccountSell() {
         submissionType = 'facebook';
         price = Number(settings?.fb_price || 0);
         credentials = {
-          identifier: formData.fbUid,
+          fbUid: formData.fbUid,
+          emailPhone: formData.fbEmailPhone,
+          identifier: formData.fbEmailPhone || formData.fbUid,
           password: formData.fbPassword,
           twoFAKey: formData.fb2FA,
           profileLink: `https://facebook.com/profile.php?id=${formData.fbUid}`
@@ -135,7 +138,7 @@ export default function AccountSell() {
       }
 
       setSuccess(true);
-      setFormData({ gmailAccount: '', gmailPassword: '', fbUid: '', fbPassword: '', fb2FA: '', igUsername: '', igPassword: '', ig2FA: '' });
+      setFormData({ gmailAccount: '', gmailPassword: '', fbUid: '', fbEmailPhone: '', fbPassword: '', fb2FA: '', igUsername: '', igPassword: '', ig2FA: '' });
     } catch (e: any) {
       setError(e.message || 'Error submitting details. Please try again.');
       console.error(e);
@@ -267,14 +270,25 @@ export default function AccountSell() {
               {isFb && (
                 <>
                   <div>
-                    <label className="block text-xs font-bold text-slate-300 mb-2">Facebook UID / Email</label>
+                    <label className="block text-xs font-bold text-slate-300 mb-2">User ID (Facebook UID)</label>
                     <input 
                       type="text" 
                       required 
                       value={formData.fbUid} 
                       onChange={e => setFormData({...formData, fbUid: e.target.value})}
-                      placeholder="Enter UID"
+                      placeholder="Enter UID (e.g. 1000847253...)"
                       className="w-full bg-slate-950 border border-slate-850 rounded-2xl px-5 py-4 font-mono text-sm text-slate-100 focus:border-indigo-500 outline-none transition-all shadow-inner" 
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 mb-2">Email / Phone (ইমেইল অথবা ফোন নাম্বার)</label>
+                    <input 
+                      type="text" 
+                      required 
+                      value={formData.fbEmailPhone} 
+                      onChange={e => setFormData({...formData, fbEmailPhone: e.target.value})}
+                      placeholder="Enter Email or Phone Number"
+                      className="w-full bg-slate-950 border border-slate-850 rounded-2xl px-5 py-4 text-sm text-slate-100 focus:border-indigo-500 outline-none transition-all shadow-inner" 
                     />
                   </div>
                   <div>

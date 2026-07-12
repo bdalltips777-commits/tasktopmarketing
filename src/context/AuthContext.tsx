@@ -117,9 +117,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Profile exists, return the first one
-      const profileRow = data[0];
+      const profileRow = { ...data[0] };
       const emailLower = (profileRow.email || '').toLowerCase();
       const resolvedRole = (emailLower === 'harunurrashid93427@gmail.com' || emailLower === 'admin@tasktop.com') ? 'admin' : (profileRow.role || 'user');
+      
+      // Retroactively link referral if local storage has a referred_by_code and profiles.referred_by is null
+      if (!profileRow.referred_by) {
+        const storedRef = localStorage.getItem('referred_by_code');
+        if (storedRef) {
+          try {
+            const { data: referrer } = await supabase
+              .from('profiles')
+              .select('id')
+              .eq('referral_code', storedRef);
+            if (referrer && referrer.length > 0 && referrer[0].id !== userId) {
+              const referrerId = referrer[0].id;
+              
+              // Update profiles table
+              const { error: updateProfileErr } = await supabase
+                .from('profiles')
+                .update({ referred_by: referrerId })
+                .eq('id', userId);
+                
+              if (!updateProfileErr) {
+                profileRow.referred_by = referrerId;
+                
+                // Insert into referrals table
+                await supabase.from('referrals').insert({
+                  referrer_id: referrerId,
+                  referred_user_id: userId,
+                  status: 'Pending'
+                });
+                
+                // Remove from local storage so we only do it once
+                localStorage.removeItem('referred_by_code');
+              }
+            }
+          } catch (e) {
+            console.error('Error auto-linking referral on load:', e);
+          }
+        }
+      }
       
       // Auto-promote in the Supabase database if it's not already 'admin'
       if ((emailLower === 'harunurrashid93427@gmail.com' || emailLower === 'admin@tasktop.com') && profileRow.role !== 'admin') {
@@ -307,6 +345,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               .from('profiles')
               .update({ referred_by: referredBy })
               .eq('id', userId);
+
+            // Insert into referrals table
+            await supabase.from('referrals').insert({
+              referrer_id: referredBy,
+              referred_user_id: userId,
+              status: 'Pending'
+            });
           }
         } else {
           // Fallback manual insert
@@ -323,6 +368,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             phone_number: ''
           };
           await supabase.from('profiles').insert(newProfileObj);
+
+          if (referredBy) {
+            // Insert into referrals table
+            await supabase.from('referrals').insert({
+              referrer_id: referredBy,
+              referred_user_id: userId,
+              status: 'Pending'
+            });
+          }
         }
       } catch (e) {
         console.error('Error synchronizing profiles table:', e);

@@ -27,34 +27,56 @@ export default function Refer() {
         if (sData) setSettings(sData);
 
         if (profile?.id) {
-          const { data: refUsers } = await supabase
+          // Fetch ALL users referred by this user from the profiles table
+          const { data: refProfiles, error: profError } = await supabase
             .from('profiles')
-            .select('id, full_name, email')
-            .eq('referred_by', profile.id);
+            .select('id, full_name, email, created_at')
+            .eq('referred_by', profile.id)
+            .order('created_at', { ascending: false });
             
-          if (refUsers && refUsers.length > 0) {
-            const userIds = refUsers.map(u => u.id);
-            const { data: subs } = await supabase
-              .from('submissions')
-              .select('user_id, type')
-              .in('user_id', userIds)
-              .eq('type', 'gmail');
+          if (profError) {
+            console.error("Error fetching referred profiles:", profError);
+          }
+            
+          if (refProfiles && refProfiles.length > 0) {
+            const userIds = refProfiles.map((p: any) => p.id);
+            
+            // Now fetch their statuses from the referrals table
+            const { data: referralsData, error: refError } = await supabase
+              .from('referrals')
+              .select('referred_user_id, status, created_at')
+              .in('referred_user_id', userIds);
+
+            if (refError) {
+               console.error("Error fetching referrals:", refError);
+            }
+
+            const usersWithStatus = refProfiles.map((p: any) => {
+              const refData = referralsData?.find(r => r.referred_user_id === p.id);
               
-            const usersWithStatus = refUsers.map(u => {
-              const hasGmail = subs?.some(s => s.user_id === u.id);
-              const maskEmail = (email: string) => {
-                if (!email) return '';
-                const parts = email.split('@');
-                if (parts.length !== 2) return email;
-                return parts[0].substring(0, 3) + '***@' + parts[1];
-              };
+              const email = p?.email;
+              let maskedEmail = 'N/A';
+              if (email && email.includes('@')) {
+                const [localPart, domain] = email.split('@');
+                if (localPart) {
+                  const visibleLen = Math.max(1, Math.min(3, Math.floor(localPart.length / 2)));
+                  maskedEmail = localPart.substring(0, visibleLen) + '***@' + domain;
+                } else {
+                  maskedEmail = `***@${domain}`;
+                }
+              }
+
               return {
-                ...u,
-                maskedEmail: maskEmail(u.email),
-                status: hasGmail ? 'Active' : 'Pending'
+                id: p.id,
+                full_name: p.full_name || 'Unknown User',
+                maskedEmail: maskedEmail,
+                status: refData?.status || 'Pending', // Show pending if old referral doesn't have a record
+                date: new Date(refData?.created_at || p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
               };
             });
             setReferredUsers(usersWithStatus);
+          } else {
+            setReferredUsers([]);
           }
         }
       } catch (e) {
@@ -132,16 +154,20 @@ export default function Refer() {
           ) : (
             <div className="space-y-3">
               {referredUsers.map((u, i) => (
-                <div key={i} className="flex justify-between items-center bg-slate-950 p-3 rounded-xl border border-slate-800">
-                  <div>
-                    <p className="text-xs font-bold text-slate-300">{u.full_name || 'Unknown User'}</p>
-                    <p className="text-[10px] font-mono text-slate-500">{u.maskedEmail}</p>
+                <div key={i} className="flex justify-between items-center bg-slate-950 p-4 rounded-xl border border-slate-800">
+                  <div className="flex flex-col gap-1">
+                    <p className="text-sm font-bold text-slate-300">{u.full_name || 'Unknown User'}</p>
+                    <p className="text-[11px] font-mono text-slate-500">{u.maskedEmail}</p>
                   </div>
-                  {u.status === 'Active' ? (
-                    <span className="text-[10px] font-black text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">এক্টিভ (Active)</span>
-                  ) : (
-                    <span className="text-[10px] font-black text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20">পেন্ডিং (Pending)</span>
-                  )}
+                  <div>
+                    {u.status === 'Active' ? (
+                      <span className="text-[10px] font-black text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-full border border-emerald-500/20">এক্টিভ (Active)</span>
+                    ) : u.status === 'Pending' ? (
+                      <span className="text-[10px] font-black text-amber-400 bg-amber-500/10 px-3 py-1.5 rounded-full border border-amber-500/20">পেন্ডিং (Pending)</span>
+                    ) : (
+                      <span className="text-[10px] font-black text-rose-400 bg-rose-500/10 px-3 py-1.5 rounded-full border border-rose-500/20">ব্যর্থ (Expired)</span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
