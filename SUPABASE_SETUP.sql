@@ -265,7 +265,7 @@ BEGIN
         COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'name', SPLIT_PART(NEW.email, '@', 1)),
         CASE WHEN NEW.email = 'harunurrashid93427@gmail.com' THEN 'admin' ELSE 'user' END,
         new_referral_code,
-        NULL,
+        NULLIF(NEW.raw_user_meta_data->>'referred_by', '')::uuid,
         0.00,
         ''
     );
@@ -419,6 +419,7 @@ CREATE TABLE IF NOT EXISTS public.referrals (
 -- Enable RLS
 ALTER TABLE public.referrals ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users can read own referrals" ON public.referrals FOR SELECT USING (auth.uid() = referrer_id OR auth.uid() = referred_user_id);
+CREATE POLICY "Enable insert for all users" ON public.referrals FOR INSERT WITH CHECK (true);
 CREATE POLICY "Admins can do everything on referrals" ON public.referrals FOR ALL USING (EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
 
 -- 2. Trigger for Task 1 & Validation (Prevent Expired updates & Credit Balance)
@@ -468,6 +469,34 @@ BEGIN
         updated_at = NOW()
     WHERE status = 'Pending' 
       AND created_at <= (NOW() - INTERVAL '30 days');
+END;
+$$;
+
+-- Create RPC function to add referrals bypassing front-end race conditions
+CREATE OR REPLACE FUNCTION public.add_referral(p_referrer_id UUID, p_new_user_id UUID)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_bonus NUMERIC(10,2);
+BEGIN
+    -- Only insert if a referral for this user doesn't exist yet
+    IF NOT EXISTS (
+        SELECT 1 FROM public.referrals WHERE referred_user_id = p_new_user_id
+    ) THEN
+        -- Get default reward_amount/referral_bonus from settings
+        SELECT COALESCE(referral_bonus, 5.00) INTO v_bonus FROM public.system_settings WHERE id = 1;
+        
+        -- Insert the pending referral record
+        INSERT INTO public.referrals (referrer_id, referred_user_id, reward_amount, status)
+        VALUES (p_referrer_id, p_new_user_id, v_bonus, 'Pending');
+
+        -- Update referred_by on profiles if not already set
+        UPDATE public.profiles
+        SET referred_by = p_referrer_id
+        WHERE id = p_new_user_id AND referred_by IS NULL;
+    END IF;
 END;
 $$;
 

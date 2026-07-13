@@ -19,7 +19,7 @@ interface AuthContextType {
   loading: boolean;
   authError: string | null;
   signInWithEmail: (email: string, password: string) => Promise<any>;
-  signUpWithEmail: (email: string, password: string, fullName: string) => Promise<any>;
+  signUpWithEmail: (email: string, password: string, fullName: string, referredBy?: string | null) => Promise<any>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -71,7 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               const { data: referrer } = await supabase
                 .from('profiles')
                 .select('id')
-                .eq('referral_code', storedRef);
+                .eq('referral_code', storedRef.toUpperCase().trim());
               if (referrer && referrer.length > 0 && referrer[0].id !== currentUser.id) {
                 referredBy = referrer[0].id;
               }
@@ -129,7 +129,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const { data: referrer } = await supabase
               .from('profiles')
               .select('id')
-              .eq('referral_code', storedRef);
+              .eq('referral_code', storedRef.toUpperCase().trim());
             if (referrer && referrer.length > 0 && referrer[0].id !== userId) {
               const referrerId = referrer[0].id;
               
@@ -295,7 +295,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return data;
   };
 
-  const signUpWithEmail = async (email: string, password: string, fullName: string) => {
+  const signUpWithEmail = async (email: string, password: string, fullName: string, referredBy?: string | null) => {
     setAuthError(null);
     const { data, error } = await supabase.auth.signUp({
       email,
@@ -303,6 +303,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       options: {
         data: {
           full_name: fullName,
+          referred_by: referredBy || null,
         }
       }
     });
@@ -310,77 +311,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) {
       setAuthError(error.message);
       throw error;
-    }
-
-    if (data.user) {
-      const userId = data.user.id;
-      
-      // Let's check for referral code in local storage
-      let referredBy: string | null = null;
-      const storedRef = localStorage.getItem('referred_by_code');
-      if (storedRef) {
-        try {
-          const { data: referrer } = await supabase
-            .from('profiles')
-            .select('id')
-            .eq('referral_code', storedRef);
-          if (referrer && referrer.length > 0 && referrer[0].id !== userId) {
-            referredBy = referrer[0].id;
-          }
-        } catch (e) {
-          console.error('Error fetching referrer during signup:', e);
-        }
-      }
-
-      try {
-        const { data: profilesList } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', userId);
-
-        if (profilesList && profilesList.length > 0) {
-          const existingProfile = profilesList[0];
-          if (referredBy && !existingProfile.referred_by) {
-            await supabase
-              .from('profiles')
-              .update({ referred_by: referredBy })
-              .eq('id', userId);
-
-            // Insert into referrals table
-            await supabase.from('referrals').insert({
-              referrer_id: referredBy,
-              referred_user_id: userId,
-              status: 'Pending'
-            });
-          }
-        } else {
-          // Fallback manual insert
-          const role = email.toLowerCase() === 'harunurrashid93427@gmail.com' ? 'admin' : 'user';
-          const refCode = generateReferralCode();
-          const newProfileObj = {
-            id: userId,
-            email: email,
-            full_name: fullName,
-            role: role,
-            wallet_balance: 0.00,
-            referral_code: refCode,
-            referred_by: referredBy,
-            phone_number: ''
-          };
-          await supabase.from('profiles').insert(newProfileObj);
-
-          if (referredBy) {
-            // Insert into referrals table
-            await supabase.from('referrals').insert({
-              referrer_id: referredBy,
-              referred_user_id: userId,
-              status: 'Pending'
-            });
-          }
-        }
-      } catch (e) {
-        console.error('Error synchronizing profiles table:', e);
-      }
     }
 
     return data;

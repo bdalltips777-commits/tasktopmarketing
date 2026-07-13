@@ -21,6 +21,28 @@ export default function Dashboard() {
     referral_domain: 'tasktopmarketing.onrender.com'
   });
   const [loading, setLoading] = useState(true);
+  const currentUser = user;
+
+  useEffect(() => {
+    const handleReferral = async () => {
+      const refCode = localStorage.getItem('referral_code');
+      if (refCode && currentUser?.id) {
+        try {
+          await supabase.rpc('add_referral', {
+            p_referrer_id: refCode,
+            p_new_user_id: currentUser.id
+          });
+        } catch (err) {
+          console.error('Error adding referral:', err);
+        } finally {
+          localStorage.removeItem('referral_code'); // Clear it immediately so it only runs once
+        }
+      }
+    };
+    if (currentUser?.id) {
+      handleReferral();
+    }
+  }, [currentUser?.id]);
 
   useEffect(() => {
     const fetchSettings = async () => {

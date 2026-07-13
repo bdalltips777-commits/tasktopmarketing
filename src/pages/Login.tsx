@@ -52,11 +52,32 @@ export default function Login() {
   const [telegramChannel, setTelegramChannel] = useState('https://t.me/your_channel');
 
   useEffect(() => {
-    // Save referral code from URL if present
-    const refCode = searchParams.get('ref');
-    if (refCode) {
-      localStorage.setItem('referred_by_code', refCode);
-      setReferralCode(refCode);
+    // Grab the ref ID from the URL using standard web API
+    const urlParams = new URLSearchParams(window.location.search);
+    const refId = urlParams.get('ref');
+    
+    if (refId) {
+      localStorage.setItem('referral_code', refId);
+      setReferralCode(refId);
+
+      // Resolve the referral code to a UUID if it is not already a UUID
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(refId)) {
+        const resolveCode = async () => {
+          try {
+            const { data } = await supabase
+              .from('profiles')
+              .select('id')
+              .eq('referral_code', refId.toUpperCase().trim());
+            if (data && data.length > 0) {
+              localStorage.setItem('referral_code', data[0].id);
+            }
+          } catch (err) {
+            console.error('Error resolving referral code:', err);
+          }
+        };
+        resolveCode();
+      }
     }
 
     // Fetch Telegram channel and support URLs
@@ -130,10 +151,38 @@ export default function Login() {
       }
 
       try {
-        if (referralCode.trim()) {
-          localStorage.setItem('referred_by_code', referralCode.trim());
+        const urlParams = new URLSearchParams(window.location.search);
+        const refId = urlParams.get('ref');
+
+        const refVal = referralCode.trim() || refId?.trim() || localStorage.getItem('referred_by_code')?.trim() || '';
+        let resolvedReferrerId: string | null = null;
+        
+        if (refVal) {
+          const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+          if (uuidRegex.test(refVal)) {
+            resolvedReferrerId = refVal;
+          } else {
+            try {
+              const { data: profileByCode } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('referral_code', refVal.toUpperCase().trim());
+              if (profileByCode && profileByCode.length > 0) {
+                resolvedReferrerId = profileByCode[0].id;
+              }
+            } catch (err) {
+              console.error('Error resolving referral code to user ID:', err);
+            }
+          }
         }
-        await signUpWithEmail(email.trim(), password, fullName.trim());
+
+        // Execute the registration passing the resolved resolvedReferrerId
+        await signUpWithEmail(email.trim(), password, fullName.trim(), resolvedReferrerId);
+
+        if (refVal) {
+          localStorage.removeItem('referred_by_code');
+        }
+
         setSuccess('রেজিস্ট্রেশন সফল হয়েছে! এখন আপনি লগইন করতে পারবেন।');
         setIsRegister(false);
         setPassword('');
