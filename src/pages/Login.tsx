@@ -216,9 +216,9 @@ export default function Login() {
   };
 
   const platforms = [
-    { name: 'Gmail Sell', icon: Mail, color: 'from-rose-500 to-red-600', text: 'জিমেইল বিক্রি' },
-    { name: 'Facebook Sell', icon: Facebook, color: 'from-blue-600 to-indigo-600', text: 'ফেসবুক বিক্রি' },
-    { name: 'Instagram Sell', icon: Instagram, color: 'from-pink-500 to-purple-600', text: 'ইনস্টাগ্রাম বিক্রি' },
+    { name: 'Gmail Work', icon: Mail, color: 'from-rose-500 to-red-600', text: 'জিমেইলের কাজ' },
+    { name: 'Facebook Work', icon: Facebook, color: 'from-blue-600 to-indigo-600', text: 'ফেসবুকের কাজ' },
+    { name: 'Instagram Work', icon: Instagram, color: 'from-pink-500 to-purple-600', text: 'ইন্সটাগ্রামের কাজ' },
     { name: 'Micro Job', icon: Briefcase, color: 'from-emerald-500 to-teal-600', text: 'মাইক্রো জব' }
   ];
 
