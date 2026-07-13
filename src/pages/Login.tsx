@@ -123,6 +123,7 @@ export default function Login() {
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
     setError('');
     setSuccess('');
     setLoading(true);
@@ -177,7 +178,12 @@ export default function Login() {
         }
 
         // Execute the registration passing the resolved resolvedReferrerId
-        await signUpWithEmail(email.trim(), password, fullName.trim(), resolvedReferrerId);
+        const data = await signUpWithEmail(email.trim(), password, fullName.trim(), resolvedReferrerId);
+
+        // STRICT RULE: You must ONLY insert a row into the referrals table IF AND ONLY IF supabase.auth.signUp() is 100% successful and returns a valid user without any errors.
+        if (!data || !data.user) {
+          throw new Error('Registration failed to return a valid user profile.');
+        }
 
         if (refVal) {
           localStorage.removeItem('referred_by_code');

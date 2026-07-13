@@ -15,8 +15,52 @@ export default function Refer() {
   const [loading, setLoading] = useState(true);
   const [referredUsers, setReferredUsers] = useState<any[]>([]);
 
+  const setReferrals = (data: any[]) => {
+    setReferredUsers(data || []);
+  };
+
+  const fetchMyReferrals = async () => {
+    try {
+      setLoading(true);
+      // বর্তমান ইউজারের আইডি বের করা
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // ডাটাবেস থেকে রেফারেল এবং ইউজারের নাম/ইমেইল একসাথে টানা (নিরাপদ উপায়ে)
+      const { data, error } = await supabase
+        .from('referrals')
+        .select(`
+          id,
+          status,
+          created_at,
+          profiles!referred_user_id (
+            full_name,
+            email
+          )
+        `)
+        .eq('referrer_id', user.id)
+        .order('created_at', { ascending: false }); // নতুনগুলো একদম উপরে দেখাবে
+
+      if (error) throw error;
+
+      // ডেটা সেট করা
+      const uniqueReferrals = data?.filter((ref: any, index, self) => {
+        const refProfile = Array.isArray(ref.profiles) ? ref.profiles[0] : ref.profiles;
+        return index === self.findIndex((t: any) => {
+          const tProfile = Array.isArray(t.profiles) ? t.profiles[0] : t.profiles;
+          return tProfile?.email === refProfile?.email;
+        });
+      });
+      setReferrals(uniqueReferrals || []);
+    } catch (error) {
+      console.error('Error fetching referrals:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchSettings = async () => {
       try {
         const { data: sData } = await supabase
           .from('system_settings')
@@ -25,67 +69,13 @@ export default function Refer() {
           .single();
 
         if (sData) setSettings(sData);
-
-        if (profile?.id) {
-          // Fetch ALL users referred by this user from the profiles table
-          const { data: refProfiles, error: profError } = await supabase
-            .from('profiles')
-            .select('id, full_name, email, created_at')
-            .eq('referred_by', profile.id)
-            .order('created_at', { ascending: false });
-            
-          if (profError) {
-            console.error("Error fetching referred profiles:", profError);
-          }
-            
-          if (refProfiles && refProfiles.length > 0) {
-            const userIds = refProfiles.map((p: any) => p.id);
-            
-            // Now fetch their statuses from the referrals table
-            const { data: referralsData, error: refError } = await supabase
-              .from('referrals')
-              .select('referred_user_id, status, created_at')
-              .in('referred_user_id', userIds);
-
-            if (refError) {
-               console.error("Error fetching referrals:", refError);
-            }
-
-            const usersWithStatus = refProfiles.map((p: any) => {
-              const refData = referralsData?.find(r => r.referred_user_id === p.id);
-              
-              const email = p?.email;
-              let maskedEmail = 'N/A';
-              if (email && email.includes('@')) {
-                const [localPart, domain] = email.split('@');
-                if (localPart) {
-                  const visibleLen = Math.max(1, Math.min(3, Math.floor(localPart.length / 2)));
-                  maskedEmail = localPart.substring(0, visibleLen) + '***@' + domain;
-                } else {
-                  maskedEmail = `***@${domain}`;
-                }
-              }
-
-              return {
-                id: p.id,
-                full_name: p.full_name || 'Unknown User',
-                maskedEmail: maskedEmail,
-                status: refData?.status || 'Pending', // Show pending if old referral doesn't have a record
-                date: new Date(refData?.created_at || p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-              };
-            });
-            setReferredUsers(usersWithStatus);
-          } else {
-            setReferredUsers([]);
-          }
-        }
       } catch (e) {
-        console.error('Error fetching refer data:', e);
-      } finally {
-        setLoading(false);
+        console.error('Error fetching settings:', e);
       }
     };
-    fetchData();
+
+    fetchSettings();
+    fetchMyReferrals();
   }, [profile]);
 
   const siteDomain = settings?.referral_domain || window.location.hostname || 'tasktopmarketing.onrender.com';
@@ -153,23 +143,43 @@ export default function Refer() {
             <p className="text-xs font-bold text-slate-500 text-center py-4">এখনো কাউকে রেফার করা হয়নি।</p>
           ) : (
             <div className="space-y-3">
-              {referredUsers.map((u, i) => (
-                <div key={i} className="flex justify-between items-center bg-slate-950 p-4 rounded-xl border border-slate-800">
-                  <div className="flex flex-col gap-1">
-                    <p className="text-sm font-bold text-slate-300">{u.full_name || 'Unknown User'}</p>
-                    <p className="text-[11px] font-mono text-slate-500">{u.maskedEmail}</p>
+              {referredUsers.map((ref: any, i) => {
+                const profilesObj = Array.isArray(ref.profiles) ? ref.profiles[0] : ref.profiles;
+                const resolvedRef = {
+                  ...ref,
+                  profiles: profilesObj
+                };
+                const email = resolvedRef.profiles?.email;
+                let maskedEmail = 'Unknown';
+                if (email && email.includes('@')) {
+                  const [localPart, domain] = email.split('@');
+                  if (localPart) {
+                    const visibleLen = Math.max(1, Math.min(3, Math.floor(localPart.length / 2)));
+                    maskedEmail = localPart.substring(0, visibleLen) + '***@' + domain;
+                  } else {
+                    maskedEmail = `***@${domain}`;
+                  }
+                }
+                return (
+                  <div key={i} className="flex justify-between items-center bg-slate-950 p-4 rounded-xl border border-slate-800">
+                    <div className="flex flex-col gap-1">
+                      <p className="text-sm font-bold text-slate-300">{resolvedRef.profiles?.full_name || 'Unknown'}</p>
+                      <p className="text-[11px] font-mono text-slate-500">
+                        {maskedEmail !== 'Unknown' ? maskedEmail : (resolvedRef.profiles?.email || 'Unknown')}
+                      </p>
+                    </div>
+                    <div>
+                      {resolvedRef.status === 'Active' ? (
+                        <span className="text-[10px] font-black text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-full border border-emerald-500/20">এক্টিভ (Active)</span>
+                      ) : resolvedRef.status === 'Pending' ? (
+                        <span className="text-[10px] font-black text-amber-400 bg-amber-500/10 px-3 py-1.5 rounded-full border border-amber-500/20">পেন্ডিং (Pending)</span>
+                      ) : (
+                        <span className="text-[10px] font-black text-rose-400 bg-rose-500/10 px-3 py-1.5 rounded-full border border-rose-500/20">ব্যর্থ (Expired)</span>
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    {u.status === 'Active' ? (
-                      <span className="text-[10px] font-black text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-full border border-emerald-500/20">এক্টিভ (Active)</span>
-                    ) : u.status === 'Pending' ? (
-                      <span className="text-[10px] font-black text-amber-400 bg-amber-500/10 px-3 py-1.5 rounded-full border border-amber-500/20">পেন্ডিং (Pending)</span>
-                    ) : (
-                      <span className="text-[10px] font-black text-rose-400 bg-rose-500/10 px-3 py-1.5 rounded-full border border-rose-500/20">ব্যর্থ (Expired)</span>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
