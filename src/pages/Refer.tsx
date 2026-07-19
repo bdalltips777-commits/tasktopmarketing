@@ -138,7 +138,7 @@ export default function Refer() {
         </div>
 
         <div className="bg-slate-900/60 border border-slate-850 p-6 rounded-[2rem] shadow-xl">
-          <h3 className="text-sm font-black text-white mb-4">আপনার রেফার তালিকা (Your Referrals)</h3>
+          <h3 className="text-sm font-black text-white mb-4">আপনার রেফার তালিকা (Referrals)</h3>
           {referredUsers.length === 0 ? (
             <p className="text-xs font-bold text-slate-500 text-center py-4">এখনো কাউকে রেফার করা হয়নি।</p>
           ) : (

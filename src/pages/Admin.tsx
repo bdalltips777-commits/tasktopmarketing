@@ -8,7 +8,7 @@ import { formatDateTime } from '../lib/dateUtils';
 
 export default function Admin() {
   const { user, profile } = useAuth();
-  const [activeTab, setActiveTab] = useState<'settings' | 'submissions' | 'withdrawals' | 'users' | 'micro_jobs' | 'gift_codes' | 'page_rules'>('settings');
+  const [activeTab, setActiveTab] = useState<'settings' | 'submissions' | 'withdrawals' | 'users' | 'micro_jobs' | 'daily_jobs' | 'gift_codes' | 'page_rules'>('settings');
   
   const [settings, setSettings] = useState<any>({
     gmail_price: 10.00,
@@ -40,6 +40,8 @@ export default function Admin() {
   const [submissionsTab, setSubmissionsTab] = useState<'Pending' | 'Approved' | 'Rejected'>('Pending');
   const [withdrawalsTab, setWithdrawalsTab] = useState<'Pending' | 'Approved' | 'Rejected'>('Pending');
   const [newJob, setNewJob] = useState({ title: '', description: '', reward_amount: '' });
+  const [dailyJobs, setDailyJobs] = useState<any[]>([]);
+  const [newDailyJob, setNewDailyJob] = useState({ title: '', description: '', reward_amount: '' });
   const [giftCodes, setGiftCodes] = useState<any[]>([]);
   const [newGiftCode, setNewGiftCode] = useState({ code: '', reward_amount: '', max_uses: '1' });
 
@@ -138,12 +140,32 @@ export default function Admin() {
       const { data: jobsResponse } = await supabase.from('micro_jobs').select('*').order('created_at', { ascending: false });
       if (jobsResponse) setMicroJobs(jobsResponse);
 
+      const { data: dailyJobsResponse } = await supabase.from('daily_jobs').select('*').order('created_at', { ascending: false });
+      if (dailyJobsResponse) setDailyJobs(dailyJobsResponse);
+
       const { data: gcResponse } = await supabase.from('gift_codes').select('*').order('created_at', { ascending: false });
       if (gcResponse) setGiftCodes(gcResponse);
     } catch (e) {
       console.error('Error fetching admin data:', e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResetLeaderboard = async () => {
+    if (!window.confirm('Are you sure you want to reset the leaderboard? This will clear all referral counts displayed on the leaderboard.')) return;
+    
+    try {
+      const now = new Date().toISOString();
+      const { error } = await supabase
+        .from('leaderboard_settings')
+        .upsert({ id: 1, last_reset_at: now });
+        
+      if (error) throw error;
+      showToast('Leaderboard has been reset successfully.', 'success');
+    } catch (err: any) {
+      console.error(err);
+      showToast('Error resetting leaderboard: ' + err.message, 'error');
     }
   };
 
@@ -259,31 +281,21 @@ export default function Admin() {
   const handleApproveSubmission = async (submission: any) => {
     setActioningId(submission.id);
     try {
-      const { error: updateSubError } = await supabase
-        .from('submissions')
-        .update({ status: 'Approved' })
-        .eq('id', submission.id)
-        .eq('status', 'Pending');
-      
-      if (updateSubError) throw new Error(updateSubError.message);
+      // 1. ATOMIC SUBMISSION APPROVAL
+      // Use the database RPC to securely approve the submission and add funds to the user's wallet
+      // in a single atomic transaction.
+      const { data: approved, error: rpcError } = await supabase.rpc('approve_submission', {
+        sub_id: submission.id,
+        target_user_id: submission.user_id,
+        amount: submission.price_at_submission
+      });
 
-      const { data: userProfile } = await supabase
-        .from('profiles')
-        .select('wallet_balance')
-        .eq('id', submission.user_id)
-        .single();
+      if (rpcError) throw new Error(rpcError.message);
+      if (!approved) throw new Error('Submission could not be approved. It may have already been processed.');
 
-      if (userProfile) {
-        const newBalance = Number(userProfile.wallet_balance || 0) + Number(submission.price_at_submission);
-        const { error: updateProfileError } = await supabase
-          .from('profiles')
-          .update({ wallet_balance: newBalance })
-          .eq('id', submission.user_id);
-          
-        if (updateProfileError) {
-          console.error("Failed to update wallet balance:", updateProfileError);
-        }
-      }
+      // Fetch strict referral bonus amount from global settings
+      const { data: settings } = await supabase.from('system_settings').select('referral_bonus').single();
+      const exactBonus = Number(settings?.referral_bonus || 5.00);
 
       // One-Chance Referral Trigger Direct
       // Check if there is a pending referral record in the referrals table
@@ -313,6 +325,7 @@ export default function Admin() {
              .insert({
                 referrer_id: userProfile.referred_by,
                 referred_user_id: submission.user_id,
+                reward_amount: exactBonus,
                 status: 'Pending'
              })
              .select()
@@ -324,10 +337,17 @@ export default function Admin() {
         }
       }
 
-      if (pendingReferral) {
+      if (pendingReferral && submission.type === 'gmail') {
+        // ATOMIC TRANSACTION VIA DATABASE TRIGGER
+        // We set the status to Active AND force the exact reward amount from settings.
+        // The trigger 'trigger_referral_update' will safely and atomically add this exact amount 
+        // to the referrer's wallet inside a single database transaction.
         const { error: updateError } = await supabase
           .from('referrals')
-          .update({ status: 'Active' })
+          .update({ 
+            status: 'Active',
+            reward_amount: exactBonus
+          })
           .eq('referred_user_id', submission.user_id)
           .eq('status', 'Pending');
           
@@ -391,7 +411,7 @@ export default function Admin() {
         }
       }
 
-      if (pendingReferral) {
+      if (pendingReferral && submission.type === 'gmail') {
         const { error: updateError } = await supabase
           .from('referrals')
           .update({ status: 'Expired' })
@@ -614,6 +634,10 @@ export default function Admin() {
           <button onClick={() => setActiveTab('micro_jobs')} className={`flex-1 py-4 px-6 text-sm font-bold flex items-center justify-center gap-2 whitespace-nowrap transition border-b-2 ${activeTab === 'micro_jobs' ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5' : 'border-transparent text-slate-400 hover:text-slate-300 hover:bg-slate-800/50'}`}>
             <Check className="w-4 h-4" /> Micro Jobs
           </button>
+          
+          <button onClick={() => setActiveTab('daily_jobs')} className={`flex-1 py-4 px-6 text-sm font-bold flex items-center justify-center gap-2 whitespace-nowrap transition border-b-2 ${activeTab === 'daily_jobs' ? 'border-amber-500 text-amber-400 bg-amber-500/5' : 'border-transparent text-slate-400 hover:text-slate-300 hover:bg-slate-800/50'}`}>
+            <Calendar className="w-4 h-4" /> Daily Jobs
+          </button>
           <button onClick={() => setActiveTab('gift_codes')} className={`flex-1 py-4 px-6 text-sm font-bold flex items-center justify-center gap-2 whitespace-nowrap transition border-b-2 ${activeTab === 'gift_codes' ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5' : 'border-transparent text-slate-400 hover:text-slate-300 hover:bg-slate-800/50'}`}>
             <Gift className="w-4 h-4" /> Gift Codes
           </button>
@@ -671,11 +695,11 @@ export default function Admin() {
                 {/* Telegram Links */}
                 <div>
                   <label className="block text-sm font-bold text-slate-300 mb-1.5">Telegram Support Link</label>
-                  <input type="text" placeholder="https://t.me/your_support" className="bg-slate-950 border border-slate-800 px-4 py-3 rounded-xl w-full focus:border-blue-500 outline-none text-sm text-slate-200 transition" value={settings?.telegram_support_link || ''} onChange={e => handleSettingsChange('telegram_support_link', e.target.value)} />
+                  <input type="text" placeholder="https://t.me/support" className="bg-slate-950 border border-slate-800 px-4 py-3 rounded-xl w-full focus:border-blue-500 outline-none text-sm text-slate-200 transition" value={settings?.telegram_support_link || ''} onChange={e => handleSettingsChange('telegram_support_link', e.target.value)} />
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-slate-300 mb-1.5">Telegram Channel Link</label>
-                  <input type="text" placeholder="https://t.me/your_channel" className="bg-slate-950 border border-slate-800 px-4 py-3 rounded-xl w-full focus:border-blue-500 outline-none text-sm text-slate-200 transition" value={settings?.telegram_channel_link || ''} onChange={e => handleSettingsChange('telegram_channel_link', e.target.value)} />
+                  <input type="text" placeholder="https://t.me/channel" className="bg-slate-950 border border-slate-800 px-4 py-3 rounded-xl w-full focus:border-blue-500 outline-none text-sm text-slate-200 transition" value={settings?.telegram_channel_link || ''} onChange={e => handleSettingsChange('telegram_channel_link', e.target.value)} />
                 </div>
 
                 {/* Withdraw / Referral Options */}
@@ -773,7 +797,13 @@ export default function Admin() {
 
               </div>
 
-              <div className="flex justify-end pt-6 border-t border-slate-800">
+              <div className="flex justify-between items-center pt-6 border-t border-slate-800">
+                <button
+                  onClick={handleResetLeaderboard}
+                  className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/20 font-bold py-3 px-6 rounded-xl shadow-sm transition active:scale-95"
+                >
+                  Reset Leaderboard
+                </button>
                 <button
                   onClick={saveSettings}
                   disabled={saving}
@@ -1119,7 +1149,7 @@ export default function Admin() {
                 </table>
                 {usersData.filter(usr => usr.email?.toLowerCase().includes(userSearchQuery.toLowerCase())).length === 0 && (
                   <div className="p-12 text-center text-slate-500 font-bold">
-                    No users found matching your search.
+                    No users found matching the search.
                   </div>
                 )}
               </div>
@@ -1148,7 +1178,7 @@ export default function Admin() {
               }} className="space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-400 mb-1">Title</label>
-                  <input required value={newJob.title} onChange={e => setNewJob({...newJob, title: e.target.value})} type="text" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200" placeholder="e.g. Subscribe to YouTube Channel" />
+                  <input required value={newJob.title} onChange={e => setNewJob({...newJob, title: e.target.value})} type="text" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200" placeholder="Enter job title" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-400 mb-1">Description (Rules & Requirements)</label>
@@ -1218,6 +1248,95 @@ export default function Admin() {
           </div>
         )}
 
+        
+
+        {/* Tab 5.5: Daily Jobs */}
+        {activeTab === 'daily_jobs' && (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+              <h3 className="text-lg font-bold text-white mb-4">Add New Daily Job</h3>
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  const { data, error } = await supabase.from('daily_jobs').insert([{ ...newDailyJob, reward_amount: Number(newDailyJob.reward_amount) }]).select();
+                  if (error) throw error;
+                  if (data) {
+                    setDailyJobs([data[0], ...dailyJobs]);
+                    setNewDailyJob({ title: '', description: '', reward_amount: '' });
+                    showToast('Daily Job created successfully!', 'success');
+                  }
+                } catch (err: any) {
+                  showToast('Error: ' + err.message, 'error');
+                }
+              }} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Title</label>
+                  <input required value={newDailyJob.title} onChange={e => setNewDailyJob({...newDailyJob, title: e.target.value})} type="text" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200" placeholder="Enter daily job title" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Description (Rules & Requirements)</label>
+                  <textarea required value={newDailyJob.description} onChange={e => setNewDailyJob({...newDailyJob, description: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 min-h-[100px]" placeholder="Explain the task step by step..." />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Reward Amount (৳)</label>
+                  <input required value={newDailyJob.reward_amount} onChange={e => setNewDailyJob({...newDailyJob, reward_amount: e.target.value})} type="number" step="0.01" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200" placeholder="0.00" />
+                </div>
+                <button type="submit" className="w-full bg-amber-600 hover:bg-amber-500 text-white font-bold py-3 px-4 rounded-xl transition">Create Daily Job</button>
+              </form>
+            </div>
+
+            <div className="space-y-4">
+              <h3 className="text-lg font-bold text-white mt-8 mb-4">Existing Daily Jobs</h3>
+              {dailyJobs.length === 0 ? (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center text-slate-500">No active daily jobs found.</div>
+              ) : (
+                dailyJobs.map((job) => (
+                  <div key={job.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex flex-col sm:flex-row gap-4 sm:items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-slate-200">{job.title}</h4>
+                      <p className="text-xs text-slate-400 mt-1 line-clamp-2">{job.description}</p>
+                      <div className="flex items-center gap-3 mt-3">
+                        <span className="text-sm font-black text-emerald-400">৳{job.reward_amount}</span>
+                        <span className={`px-2 py-0.5 text-[10px] font-bold uppercase rounded ${job.status ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>{job.status ? 'Active' : 'Inactive'}</span>
+                      </div>
+                    </div>
+                    <div className="flex sm:flex-col gap-2 shrink-0">
+                      <button 
+                        onClick={async () => {
+                          try {
+                            const { error } = await supabase.from('daily_jobs').update({ status: !job.status }).eq('id', job.id);
+                            if (error) throw error;
+                            setDailyJobs(dailyJobs.map(j => j.id === job.id ? { ...j, status: !job.status } : j));
+                            showToast(`Daily Job is now ${!job.status ? 'Active' : 'Inactive'}!`, 'success');
+                          } catch (err: any) {
+                            showToast('Error toggling status: ' + err.message, 'error');
+                          }
+                        }}
+                        className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 text-xs font-bold rounded-lg transition"
+                      >Toggle Status</button>
+                      <button 
+                        onClick={async () => {
+                          if(!confirm('Delete this daily job? All associated user submissions will also be deleted.')) return;
+                          try {
+                            await supabase.from('daily_job_submissions').delete().eq('job_id', job.id);
+                            const { error } = await supabase.from('daily_jobs').delete().eq('id', job.id);
+                            if (error) throw error;
+                            setDailyJobs(dailyJobs.filter(j => j.id !== job.id));
+                            showToast('Daily Job deleted successfully!', 'success');
+                          } catch (err: any) {
+                            showToast('Error deleting Daily Job: ' + err.message, 'error');
+                          }
+                        }}
+                        className="flex-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/20 px-4 py-2 text-xs font-bold rounded-lg transition"
+                      >Delete Job</button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Tab 6: Gift Codes */}
         {activeTab === 'gift_codes' && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -1234,7 +1353,7 @@ export default function Admin() {
                     type="text"
                     value={newGiftCode.code}
                     onChange={(e) => setNewGiftCode({...newGiftCode, code: e.target.value})}
-                    placeholder="e.g. WELCOME50"
+                    placeholder="Enter Gift Code"
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-200 outline-none focus:border-purple-500 font-mono uppercase"
                   />
                 </div>
@@ -1244,7 +1363,7 @@ export default function Admin() {
                     type="number"
                     value={newGiftCode.reward_amount}
                     onChange={(e) => setNewGiftCode({...newGiftCode, reward_amount: e.target.value})}
-                    placeholder="e.g. 50"
+                    placeholder="Enter amount"
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-200 outline-none focus:border-purple-500 font-mono"
                   />
                 </div>
@@ -1254,7 +1373,7 @@ export default function Admin() {
                     type="number"
                     value={newGiftCode.max_uses}
                     onChange={(e) => setNewGiftCode({...newGiftCode, max_uses: e.target.value})}
-                    placeholder="e.g. 100"
+                    placeholder="Enter max uses"
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-200 outline-none focus:border-purple-500 font-mono"
                   />
                 </div>
@@ -1420,7 +1539,7 @@ export default function Admin() {
                 step="0.01"
                 value={editBalanceValue}
                 onChange={(e) => setEditBalanceValue(e.target.value)}
-                placeholder="Enter balance (e.g. 100)"
+                placeholder="Enter balance"
                 className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-3 text-slate-200 text-sm font-bold outline-none transition"
               />
             </div>

@@ -7,6 +7,8 @@ import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
 import AccountSell from './pages/AccountSell';
 import MicroJob from './pages/MicroJob';
+import DailyJob from './pages/DailyJob';
+import Leaderboard from './pages/Leaderboard';
 import GiftCode from './pages/GiftCode';
 import Refer from './pages/Refer';
 import Profile from './pages/Profile';
@@ -30,6 +32,8 @@ export default function App() {
             <Route path="/withdraw" element={<Withdraw />} />
             <Route path="/history" element={<History />} />
             <Route path="/micro-jobs" element={<MicroJob />} />
+            <Route path="/daily-jobs" element={<DailyJob />} />
+            <Route path="/leaderboard" element={<Leaderboard />} />
           </Route>
 
           <Route element={<ProtectedRoute requireAdmin />}>

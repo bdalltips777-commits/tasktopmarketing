@@ -7,7 +7,7 @@ import { motion } from 'motion/react';
 
 export default function Profile() {
   const { profile, refreshProfile } = useAuth();
-  const [phoneNumber, setPhoneNumber] = useState(profile?.phoneNumber || '');
+  const [fullName, setFullName] = useState(profile?.fullName || '');
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
@@ -22,7 +22,7 @@ export default function Profile() {
     try {
       const { error: updateError } = await supabase
         .from('profiles')
-        .update({ phone_number: phoneNumber })
+        .update({ full_name: fullName })
         .eq('id', profile.id);
 
       if (updateError) {
@@ -87,9 +87,9 @@ export default function Profile() {
                 </div>
                 <input 
                   type="text" 
-                  readOnly 
-                  value={profile?.fullName || ''} 
-                  className="w-full bg-slate-950/50 border border-slate-900 rounded-2xl pl-11 pr-4 py-4 text-xs text-slate-500 outline-none font-bold" 
+                  value={fullName}
+                  onChange={e => setFullName(e.target.value)} 
+                  className="w-full bg-slate-950 border border-slate-850 rounded-2xl pl-11 pr-4 py-4 text-xs text-slate-100 outline-none focus:border-indigo-500 transition-all shadow-inner font-bold" 
                 />
               </div>
             </div>
@@ -118,21 +118,6 @@ export default function Profile() {
                   readOnly 
                   value={profile?.referralCode || ''} 
                   className="w-full bg-slate-950/50 border border-slate-900 rounded-2xl pl-11 pr-4 py-4 text-xs text-indigo-400 outline-none font-mono font-bold" 
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-2">Phone Number (মোবাইল নম্বর)</label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500">
-                  <Phone className="w-5 h-5" />
-                </div>
-                <input 
-                  type="text" 
-                  value={phoneNumber} 
-                  onChange={e => setPhoneNumber(e.target.value)} 
-                  placeholder="যেমন: 017XXXXXXXX" 
-                  className="w-full bg-slate-950 border border-slate-850 rounded-2xl pl-11 pr-4 py-4 text-xs text-slate-100 outline-none focus:border-indigo-500 transition-all shadow-inner font-bold" 
                 />
               </div>
             </div>

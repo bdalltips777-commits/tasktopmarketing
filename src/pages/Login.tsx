@@ -19,7 +19,8 @@ import {
   Eye,
   EyeOff,
   Users,
-  Briefcase
+  Briefcase,
+  Calendar
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -48,8 +49,8 @@ export default function Login() {
 
   // Suspended account states
   const [showSuspendedModal, setShowSuspendedModal] = useState(false);
-  const [telegramSupport, setTelegramSupport] = useState('https://t.me/your_support');
-  const [telegramChannel, setTelegramChannel] = useState('https://t.me/your_channel');
+  const [telegramSupport, setTelegramSupport] = useState('https://t.me/support');
+  const [telegramChannel, setTelegramChannel] = useState('https://t.me/channel');
 
   useEffect(() => {
     // Grab the ref ID from the URL using standard web API
@@ -219,7 +220,8 @@ export default function Login() {
     { name: 'Gmail Work', icon: Mail, color: 'from-rose-500 to-red-600', text: 'জিমেইলের কাজ' },
     { name: 'Facebook Work', icon: Facebook, color: 'from-blue-600 to-indigo-600', text: 'ফেসবুকের কাজ' },
     { name: 'Instagram Work', icon: Instagram, color: 'from-pink-500 to-purple-600', text: 'ইন্সটাগ্রামের কাজ' },
-    { name: 'Micro Job', icon: Briefcase, color: 'from-emerald-500 to-teal-600', text: 'মাইক্রো জব' }
+    { name: 'Micro Job', icon: Briefcase, color: 'from-emerald-500 to-teal-600', text: 'মাইক্রো জব' },
+    { name: 'Daily Job', icon: Calendar, color: 'from-amber-500 to-orange-600', text: 'ডেইলি জব' }
   ];
 
   return (
@@ -329,7 +331,7 @@ export default function Login() {
                     required
                     value={email}
                     onChange={e => setEmail(e.target.value)}
-                    placeholder="example@gmail.com"
+                    placeholder="Email address"
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-11 pr-4 py-3 text-xs sm:text-sm text-slate-100 focus:border-indigo-500 outline-none transition font-bold"
                   />
                 </div>

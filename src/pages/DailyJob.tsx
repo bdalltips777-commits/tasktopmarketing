@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { motion } from 'motion/react';
 
-export default function MicroJob() {
+export default function DailyJob() {
   const { profile } = useAuth();
   const [jobs, setJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -21,14 +21,14 @@ export default function MicroJob() {
     if (!profile) return;
     try {
       const { data: submittedData } = await supabase
-        .from('micro_job_submissions')
+        .from('daily_job_submissions')
         .select('job_id')
         .eq('user_id', profile.id);
 
       const submittedJobIds = submittedData?.map(s => s.job_id) || [];
 
       const { data, error } = await supabase
-        .from('micro_jobs')
+        .from('daily_jobs')
         .select('*')
         .eq('status', true)
         .order('created_at', { ascending: false });
@@ -55,7 +55,7 @@ export default function MicroJob() {
 
     setSubmittingId(jobId);
     try {
-      const { error } = await supabase.from('micro_job_submissions').insert({
+      const { error } = await supabase.from('daily_job_submissions').insert({
         user_id: profile.id,
         job_id: jobId,
         proof_text: proofText
@@ -81,7 +81,7 @@ export default function MicroJob() {
       <header className="p-6 sticky top-0 z-10 flex items-center justify-between backdrop-blur-md bg-slate-950/70 border-b border-slate-900">
         <div className="flex items-center gap-4">
           <Link to="/" className="p-3 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-2xl shadow-sm transition"><ArrowLeft className="w-5 h-5 text-slate-300" /></Link>
-          <h1 className="text-lg font-black text-white">Micro Jobs (মাইক্রো জব)</h1>
+          <h1 className="text-lg font-black text-white">Daily Jobs (ডেইলি জব)</h1>
         </div>
       </header>
 
@@ -96,7 +96,7 @@ export default function MicroJob() {
             animate={{ opacity: 1, y: 0 }}
             className="text-center p-12 bg-slate-900 border border-slate-850 rounded-[2rem] shadow-xl"
           >
-            <p className="text-slate-400 font-medium text-lg">আপাতত মাইক্রো জব এর কাজ নেই, সামনে আসছে...</p>
+            <p className="text-slate-400 font-medium text-lg">আপাতত ডেইলি জব এর কাজ নেই, সামনে আসছে...</p>
           </motion.div>
         ) : (
           jobs.map((job, idx) => (

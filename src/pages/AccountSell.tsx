@@ -276,7 +276,7 @@ export default function AccountSell() {
                       required 
                       value={formData.fbUid} 
                       onChange={e => setFormData({...formData, fbUid: e.target.value})}
-                      placeholder="Enter UID (e.g. 1000847253...)"
+                      placeholder="Facebook user ID"
                       className="w-full bg-slate-950 border border-slate-850 rounded-2xl px-5 py-4 font-mono text-sm text-slate-100 focus:border-indigo-500 outline-none transition-all shadow-inner" 
                     />
                   </div>
@@ -287,7 +287,7 @@ export default function AccountSell() {
                       required 
                       value={formData.fbEmailPhone} 
                       onChange={e => setFormData({...formData, fbEmailPhone: e.target.value})}
-                      placeholder="Enter Email or Phone Number"
+                      placeholder="Email or phone number"
                       className="w-full bg-slate-950 border border-slate-850 rounded-2xl px-5 py-4 text-sm text-slate-100 focus:border-indigo-500 outline-none transition-all shadow-inner" 
                     />
                   </div>
@@ -298,7 +298,7 @@ export default function AccountSell() {
                       required 
                       value={formData.fbPassword} 
                       onChange={e => setFormData({...formData, fbPassword: e.target.value})}
-                      placeholder="Enter password"
+                      placeholder="Password"
                       className="w-full bg-slate-950 border border-slate-850 rounded-2xl px-5 py-4 font-mono text-sm text-slate-100 focus:border-indigo-500 outline-none transition-all shadow-inner" 
                     />
                   </div>
@@ -309,7 +309,7 @@ export default function AccountSell() {
                       required 
                       value={formData.fb2FA} 
                       onChange={e => setFormData({...formData, fb2FA: e.target.value})}
-                      placeholder="Enter 2FA Secret Key"
+                      placeholder="2FA secret key"
                       className="w-full bg-slate-950 border border-slate-850 rounded-2xl px-5 py-4 font-mono text-sm text-slate-100 focus:border-indigo-500 outline-none transition-all shadow-inner" 
                     />
                   </div>
@@ -325,7 +325,7 @@ export default function AccountSell() {
                       required 
                       value={formData.igUsername} 
                       onChange={e => setFormData({...formData, igUsername: e.target.value})}
-                      placeholder="Enter Username"
+                      placeholder="Instagram user ID"
                       className="w-full bg-slate-950 border border-slate-850 rounded-2xl px-5 py-4 font-mono text-sm text-slate-100 focus:border-indigo-500 outline-none transition-all shadow-inner" 
                     />
                   </div>
@@ -336,7 +336,7 @@ export default function AccountSell() {
                       required 
                       value={formData.igPassword} 
                       onChange={e => setFormData({...formData, igPassword: e.target.value})}
-                      placeholder="Enter password"
+                      placeholder="Password"
                       className="w-full bg-slate-950 border border-slate-850 rounded-2xl px-5 py-4 font-mono text-sm text-slate-100 focus:border-indigo-500 outline-none transition-all shadow-inner" 
                     />
                   </div>
@@ -347,7 +347,7 @@ export default function AccountSell() {
                       required 
                       value={formData.ig2FA} 
                       onChange={e => setFormData({...formData, ig2FA: e.target.value})}
-                      placeholder="Enter 2FA Secret Key"
+                      placeholder="2FA secret key"
                       className="w-full bg-slate-950 border border-slate-850 rounded-2xl px-5 py-4 font-mono text-sm text-slate-100 focus:border-indigo-500 outline-none transition-all shadow-inner" 
                     />
                   </div>
@@ -363,7 +363,7 @@ export default function AccountSell() {
                       required 
                       value={formData.gmailAccount} 
                       onChange={e => setFormData({...formData, gmailAccount: e.target.value})}
-                      placeholder="Enter email address"
+                      placeholder="Email address"
                       className="w-full bg-slate-950 border border-slate-850 rounded-2xl px-5 py-4 text-sm text-slate-100 focus:border-indigo-500 outline-none transition-all shadow-inner" 
                     />
                   </div>
@@ -374,7 +374,7 @@ export default function AccountSell() {
                       required 
                       value={formData.gmailPassword} 
                       onChange={e => setFormData({...formData, gmailPassword: e.target.value})}
-                      placeholder="Enter password"
+                      placeholder="Password"
                       className="w-full bg-slate-950 border border-slate-850 rounded-2xl px-5 py-4 font-mono text-sm text-slate-100 focus:border-indigo-500 outline-none transition-all shadow-inner" 
                     />
                   </div>

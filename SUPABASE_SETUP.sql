@@ -703,3 +703,64 @@ BEGIN
     END IF;
 END;
 $$;
+
+-- ==========================================
+-- DAILY JOBS
+-- ==========================================
+CREATE TABLE IF NOT EXISTS public.daily_jobs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    reward_amount NUMERIC(10,2) NOT NULL DEFAULT 0.00,
+    status BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+ALTER TABLE public.daily_jobs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Enable read access for all users" ON public.daily_jobs FOR SELECT USING (true);
+CREATE POLICY "Enable all access for admins" ON public.daily_jobs FOR ALL USING (
+    EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin')
+);
+
+CREATE TABLE IF NOT EXISTS public.daily_job_submissions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES public.profiles(id) NOT NULL,
+    job_id UUID REFERENCES public.daily_jobs(id) NOT NULL,
+    proof_text TEXT NOT NULL,
+    status TEXT DEFAULT 'Pending' CHECK (status IN ('Pending', 'Approved', 'Rejected')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+ALTER TABLE public.daily_job_submissions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow select daily job submissions for owners or admins" ON public.daily_job_submissions FOR SELECT USING (
+    auth.uid() = user_id OR EXISTS (
+        SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
+CREATE POLICY "Allow insert daily job submissions for logged in owners" ON public.daily_job_submissions FOR INSERT WITH CHECK (
+    auth.uid() = user_id
+);
+CREATE POLICY "Allow admin to update daily job submissions" ON public.daily_job_submissions FOR UPDATE USING (
+    EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin')
+);
+
+-- Note for user: Run this migration to apply unique constraints to prevent double submissions.
+-- ALTER TABLE public.micro_job_submissions ADD CONSTRAINT unique_micro_job_user UNIQUE(job_id, user_id);
+-- ALTER TABLE public.daily_job_submissions ADD CONSTRAINT unique_daily_job_user UNIQUE(job_id, user_id);
+
+
+-- ==========================================
+-- LEADERBOARD SETTINGS
+-- ==========================================
+CREATE TABLE IF NOT EXISTS public.leaderboard_settings (
+    id INTEGER PRIMARY KEY DEFAULT 1 CONSTRAINT single_row_check CHECK (id = 1),
+    last_reset_at TIMESTAMP WITH TIME ZONE DEFAULT '2000-01-01T00:00:00Z'
+);
+
+ALTER TABLE public.leaderboard_settings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Enable read access for all users" ON public.leaderboard_settings FOR SELECT USING (true);
+CREATE POLICY "Enable all access for admins" ON public.leaderboard_settings FOR ALL USING (
+    EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin')
+);
+
+INSERT INTO public.leaderboard_settings (id, last_reset_at) VALUES (1, '2000-01-01T00:00:00Z') ON CONFLICT DO NOTHING;

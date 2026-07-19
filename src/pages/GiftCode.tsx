@@ -112,7 +112,7 @@ export default function GiftCode() {
            
            <h2 className="text-2xl font-black text-white mb-2">Have a gift code?</h2>
            <p className="text-slate-400 font-medium text-xs mb-8">
-             Enter your gift code below. After quick admin verification, the gift reward will be added securely to your balance.
+             Enter gift code below. After quick admin verification, the gift reward will be added securely to balance.
            </p>
            
            {error && (
