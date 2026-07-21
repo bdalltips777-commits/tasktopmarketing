@@ -87,9 +87,9 @@ export default function Dashboard() {
   const cards = [
     { name: 'Daily Job (ডেইলি জব)', path: '/daily-jobs', icon: Calendar, color: 'text-fuchsia-400 bg-fuchsia-500/10 border-fuchsia-500/20' },
     { name: 'Micro Job (মাইক্রো জব)', path: '/micro-jobs', icon: Briefcase, color: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20' },
-    { name: 'Gmail Sell (জিমেইল বিক্রি)', path: '/sell/gmail', icon: Mail, color: 'text-rose-400 bg-rose-500/10 border-rose-500/20' },
-    { name: 'Facebook Sell (ফেসবুক বিক্রি)', path: '/sell/fb', icon: Facebook, color: 'text-blue-400 bg-blue-500/10 border-blue-500/20' },
-    { name: 'Instagram Sell (ইনস্টাগ্রাম বিক্রি)', path: '/sell/ig', icon: Instagram, color: 'text-pink-400 bg-pink-500/10 border-pink-500/20' },
+    { name: 'Gmail Work (জিমেইলের কাজ)', path: '/sell/gmail', icon: Mail, color: 'text-rose-400 bg-rose-500/10 border-rose-500/20' },
+    { name: 'Facebook Work (ফেসবুকের কাজ)', path: '/sell/fb', icon: Facebook, color: 'text-blue-400 bg-blue-500/10 border-blue-500/20' },
+    { name: 'Instagram Work (ইন্সটাগ্রামের কাজ)', path: '/sell/ig', icon: Instagram, color: 'text-pink-400 bg-pink-500/10 border-pink-500/20' },
     { name: 'Gift Code', path: '/gift-code', icon: Gift, color: 'text-purple-400 bg-purple-500/10 border-purple-500/20' },
     { name: 'Refer (রেফার)', path: '/refer', icon: Users, color: 'text-orange-400 bg-orange-500/10 border-orange-500/20' },
     { name: 'Leaderboard (লিডারবোর্ড)', path: '/leaderboard', icon: Trophy, color: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20' },
