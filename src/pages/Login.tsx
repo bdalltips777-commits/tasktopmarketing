@@ -2,9 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Navigate, useSearchParams, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+
 import { 
   Loader2, 
-  Mail, 
+  Mail,
+  Gift, 
   Lock,
   User,
   Facebook, 
@@ -217,11 +219,12 @@ export default function Login() {
   };
 
   const platforms = [
-    { name: 'Gmail Work', icon: Mail, color: 'from-rose-500 to-red-600', text: 'জিমেইলের কাজ' },
-    { name: 'Facebook Work', icon: Facebook, color: 'from-blue-600 to-indigo-600', text: 'ফেসবুকের কাজ' },
-    { name: 'Instagram Work', icon: Instagram, color: 'from-pink-500 to-purple-600', text: 'ইন্সটাগ্রামের কাজ' },
+    { name: 'Daily Job', icon: Calendar, color: 'from-fuchsia-500 to-purple-600', text: 'ডেইলি জব' },
     { name: 'Micro Job', icon: Briefcase, color: 'from-emerald-500 to-teal-600', text: 'মাইক্রো জব' },
-    { name: 'Daily Job', icon: Calendar, color: 'from-amber-500 to-orange-600', text: 'ডেইলি জব' }
+    { name: 'Gmail Sell', icon: Mail, color: 'from-rose-500 to-red-600', text: 'জিমেইল বিক্রি' },
+    { name: 'Facebook Sell', icon: Facebook, color: 'from-blue-600 to-indigo-600', text: 'ফেসবুক বিক্রি' },
+    { name: 'Instagram Sell', icon: Instagram, color: 'from-pink-500 to-purple-600', text: 'ইন্সটাগ্রাম বিক্রি' },
+    { name: 'Gift Code', icon: Gift, color: 'from-amber-500 to-yellow-600', text: 'গিফট কোড' }
   ];
 
   return (
