@@ -38,6 +38,8 @@ export default function Admin() {
   const [uploadingImage, setUploadingImage] = useState(false);
   const [actioningId, setActioningId] = useState<string | null>(null);
   const [submissionsTab, setSubmissionsTab] = useState<'Pending' | 'Approved' | 'Rejected'>('Pending');
+  const [submissionSearchQuery, setSubmissionSearchQuery] = useState('');
+  const [submissionFilterCategory, setSubmissionFilterCategory] = useState('All');
   const [withdrawalsTab, setWithdrawalsTab] = useState<'Pending' | 'Approved' | 'Rejected'>('Pending');
   const [newJob, setNewJob] = useState({ title: '', description: '', reward_amount: '' });
   const [dailyJobs, setDailyJobs] = useState<any[]>([]);
@@ -89,28 +91,74 @@ export default function Admin() {
         setPageRules(rulesMap);
       }
 
+      let allSubmissions: any[] = [];
       const { data: subData, error: subErr } = await supabase
         .from('submissions')
         .select(`*, profiles (id, full_name, email, phone_number)`)
         .order('created_at', { ascending: false });
 
       if (subData && !subErr) {
-        const mappedSubs = subData.map((sub: any) => ({
+        allSubmissions.push(...subData.map((sub: any) => ({
+          ...sub,
+          table_source: 'submissions'
+        })));
+      }
+
+      const { data: microSubData } = await supabase
+        .from('micro_job_submissions')
+        .select(`*, profiles (id, full_name, email, phone_number), micro_jobs(title, reward_amount)`)
+        .order('created_at', { ascending: false });
+      
+      if (microSubData) {
+        allSubmissions.push(...microSubData.map((sub: any) => ({
           id: sub.id,
           user_id: sub.user_id,
-          type: sub.type,
-          credentials_json: sub.credentials_json,
-          price_at_submission: sub.price_at_submission,
+          type: 'microjob',
+          credentials_json: JSON.stringify({ proof: sub.proof_text, job_title: sub.micro_jobs?.title }),
+          price_at_submission: sub.micro_jobs?.reward_amount || 0,
           status: sub.status,
           created_at: sub.created_at,
-          user: sub.profiles ? {
-            fullName: sub.profiles.full_name || 'Unknown',
-            email: sub.profiles.email || 'No email',
-            phoneNumber: sub.profiles.phone_number || ''
-          } : { fullName: 'Unknown', email: 'unknown' }
-        }));
-        setSubmissions(mappedSubs);
+          profiles: sub.profiles,
+          table_source: 'micro_job_submissions'
+        })));
       }
+
+      const { data: dailySubData } = await supabase
+        .from('daily_job_submissions')
+        .select(`*, profiles (id, full_name, email, phone_number), daily_jobs(title, reward_amount)`)
+        .order('created_at', { ascending: false });
+      
+      if (dailySubData) {
+        allSubmissions.push(...dailySubData.map((sub: any) => ({
+          id: sub.id,
+          user_id: sub.user_id,
+          type: 'dailyjob',
+          credentials_json: JSON.stringify({ proof: sub.proof_text, job_title: sub.daily_jobs?.title }),
+          price_at_submission: sub.daily_jobs?.reward_amount || 0,
+          status: sub.status,
+          created_at: sub.created_at,
+          profiles: sub.profiles,
+          table_source: 'daily_job_submissions'
+        })));
+      }
+
+      const mappedSubs = allSubmissions.map((sub: any) => ({
+        id: sub.id,
+        user_id: sub.user_id,
+        type: sub.type,
+        credentials_json: sub.credentials_json,
+        price_at_submission: sub.price_at_submission,
+        status: sub.status,
+        created_at: sub.created_at,
+        table_source: sub.table_source,
+        user: sub.profiles ? {
+          fullName: sub.profiles.full_name || 'Unknown',
+          email: sub.profiles.email || 'No email',
+          phoneNumber: sub.profiles.phone_number || ''
+        } : { fullName: 'Unknown', email: 'unknown' }
+      }));
+      mappedSubs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      setSubmissions(mappedSubs);
 
       const { data: wData, error: wErr } = await supabase
         .from('withdrawals')
@@ -281,17 +329,26 @@ export default function Admin() {
   const handleApproveSubmission = async (submission: any) => {
     setActioningId(submission.id);
     try {
-      // 1. ATOMIC SUBMISSION APPROVAL
-      // Use the database RPC to securely approve the submission and add funds to the user's wallet
-      // in a single atomic transaction.
-      const { data: approved, error: rpcError } = await supabase.rpc('approve_submission', {
-        sub_id: submission.id,
-        target_user_id: submission.user_id,
-        amount: submission.price_at_submission
-      });
+      if (!submission.table_source || submission.table_source === 'submissions') {
+        const { data: approved, error: rpcError } = await supabase.rpc('approve_submission', {
+          sub_id: submission.id,
+          target_user_id: submission.user_id,
+          amount: submission.price_at_submission
+        });
 
-      if (rpcError) throw new Error(rpcError.message);
-      if (!approved) throw new Error('Submission could not be approved. It may have already been processed.');
+        if (rpcError) throw new Error(rpcError.message);
+        if (!approved) throw new Error('Submission could not be approved. It may have already been processed.');
+      } else {
+        const { data: userProfile, error: profileError } = await supabase.from('profiles').select('wallet_balance').eq('id', submission.user_id).single();
+        if (profileError) throw profileError;
+
+        const newBalance = Number(userProfile.wallet_balance) + Number(submission.price_at_submission);
+        const { error: balanceError } = await supabase.from('profiles').update({ wallet_balance: newBalance }).eq('id', submission.user_id);
+        if (balanceError) throw balanceError;
+
+        const { error: subError } = await supabase.from(submission.table_source).update({ status: 'Approved' }).eq('id', submission.id);
+        if (subError) throw subError;
+      }
 
       // Fetch strict referral bonus amount from global settings
       const { data: settings } = await supabase.from('system_settings').select('referral_bonus').single();
@@ -371,7 +428,7 @@ export default function Admin() {
     setActioningId(submission.id);
     try {
       const { error } = await supabase
-        .from('submissions')
+        .from(submission.table_source || 'submissions')
         .update({ status: 'Rejected' })
         .eq('id', submission.id);
 
@@ -588,7 +645,9 @@ export default function Admin() {
   };
 
   if (loading) {
-    return (
+
+
+  return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400">
         <Loader2 className="w-12 h-12 animate-spin text-indigo-500 mb-4" />
         <p className="font-medium animate-pulse">Loading Admin Data...</p>
@@ -597,6 +656,27 @@ export default function Admin() {
   }
 
   const pendingSubmissionsCount = submissions.filter(s => s.status === 'Pending').length;
+    const filteredSubmissions = submissions
+    .filter(s => s.status === submissionsTab)
+    .filter(s => {
+      if (submissionFilterCategory !== 'All') {
+        if (s.type.toLowerCase() !== submissionFilterCategory.toLowerCase()) return false;
+      }
+      if (submissionSearchQuery) {
+        const query = submissionSearchQuery.toLowerCase();
+        const email = (s.user?.email || '').toLowerCase();
+        let dataStr = '';
+        try {
+           const parsed = typeof s.credentials_json === 'string' ? JSON.parse(s.credentials_json) : s.credentials_json;
+           dataStr = Object.values(parsed || {}).join(' ').toLowerCase();
+        } catch(e) {
+           dataStr = String(s.credentials_json || '').toLowerCase();
+        }
+        return email.includes(query) || dataStr.includes(query);
+      }
+      return true;
+    });
+
   const pendingWithdrawalsCount = withdrawals.filter(w => w.status === 'Pending').length;
 
   return (
@@ -818,6 +898,8 @@ export default function Admin() {
           </div>
         )}
 
+        
+
         {/* Tab 2: Submissions */}
         {activeTab === 'submissions' && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -826,18 +908,69 @@ export default function Admin() {
               <button onClick={() => setSubmissionsTab('Approved')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${submissionsTab === 'Approved' ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>Approved</button>
               <button onClick={() => setSubmissionsTab('Rejected')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${submissionsTab === 'Rejected' ? 'bg-rose-500 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>Rejected</button>
             </div>
-            {submissions.filter(s => s.status === submissionsTab).length === 0 ? (
+            
+            <div className="flex flex-col md:flex-row gap-4 bg-slate-900/50 p-4 rounded-2xl border border-slate-800/50 mb-6">
+              <div className="flex-1">
+                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Search by User Email or Submitted Data...</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Search className="h-4 w-4 text-slate-500" />
+                  </div>
+                  <input
+                    type="text"
+                    value={submissionSearchQuery}
+                    onChange={(e) => setSubmissionSearchQuery(e.target.value)}
+                    placeholder="Search by Email or Proof..."
+                    className="w-full pl-10 pr-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 text-sm focus:outline-none focus:border-indigo-500/50 transition-colors placeholder:text-slate-600"
+                  />
+                </div>
+              </div>
+              <div className="w-full md:w-64">
+                <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Category Filter</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {['All', 'Gmail', 'Facebook', 'Instagram', 'Microjob'].map(cat => (
+                    <button
+                      key={cat}
+                      onClick={() => setSubmissionFilterCategory(cat)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                        submissionFilterCategory === cat 
+                          ? 'bg-slate-700/80 text-white border-slate-600 shadow-sm' 
+                          : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-300'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            {filteredSubmissions.length === 0 ? (
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center">
                 <Shield className="w-12 h-12 text-slate-700 mx-auto mb-4" />
                 <h3 className="text-lg font-bold text-slate-400">No {submissionsTab.toLowerCase()} submissions</h3>
               </div>
             ) : (
-              submissions.filter(s => s.status === submissionsTab).map((sub) => (
+              filteredSubmissions.map((sub) => {
+                let parsedCreds: any = sub.credentials_json;
+                try {
+                  if (typeof parsedCreds === 'string') {
+                    parsedCreds = JSON.parse(parsedCreds);
+                  }
+                } catch(e) {}
+                
+                return (
+
                 <div key={sub.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex flex-col md:flex-row gap-5 hover:border-slate-700 transition">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-3">
-                      <span className={`px-2.5 py-1 text-[10px] uppercase tracking-wider font-black rounded-full ${sub.type === 'gmail' ? 'bg-red-500/10 text-red-400' : sub.type === 'facebook' ? 'bg-blue-500/10 text-blue-400' : 'bg-pink-500/10 text-pink-400'}`}>
-                        {sub.type} Account
+                      <span className={`px-2.5 py-1 text-[10px] uppercase tracking-wider font-black rounded-full ${
+                        sub.type === 'gmail' ? 'bg-red-500/10 text-red-400' : 
+                        sub.type === 'facebook' ? 'bg-blue-500/10 text-blue-400' : 
+                        sub.type === 'instagram' ? 'bg-pink-500/10 text-pink-400' :
+                        sub.type === 'microjob' ? 'bg-indigo-500/10 text-indigo-400' :
+                        'bg-amber-500/10 text-amber-400'
+                      }`}>
+                        {sub.type} {sub.type === 'microjob' || sub.type === 'dailyjob' ? 'Submission' : 'Account'}
                       </span>
                       <span className="text-xs text-slate-500 font-medium">{formatDateTime(sub.created_at)}</span>
                     </div>
@@ -858,33 +991,40 @@ export default function Admin() {
                       <p className="text-[10px] text-slate-500 mb-2 uppercase tracking-wider">Credentials</p>
                       {sub.type === 'gmail' && (
                         <div className="space-y-1">
-                          <p className="flex items-center gap-2"><span className="text-indigo-400">Email:</span> {sub.credentials_json.email} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(sub.credentials_json.email)} /></p>
-                          <p className="flex items-center gap-2"><span className="text-indigo-400">Password:</span> {sub.credentials_json.password} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(sub.credentials_json.password)} /></p>
-                          <p className="flex items-center gap-2"><span className="text-indigo-400">Recovery:</span> {sub.credentials_json.recoveryEmail} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(sub.credentials_json.recoveryEmail)} /></p>
+                          <p className="flex items-center gap-2"><span className="text-indigo-400">Email:</span> {parsedCreds.email} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(parsedCreds.email)} /></p>
+                          <p className="flex items-center gap-2"><span className="text-indigo-400">Password:</span> {parsedCreds.password} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(parsedCreds.password)} /></p>
+                          <p className="flex items-center gap-2"><span className="text-indigo-400">Recovery:</span> {parsedCreds.recoveryEmail} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(parsedCreds.recoveryEmail)} /></p>
                         </div>
                       )}
                       {sub.type === 'facebook' && (
                         <div className="space-y-1">
-                          {sub.credentials_json.fbUid && (
-                            <p className="flex items-center gap-2"><span className="text-indigo-400">User ID (UID):</span> {sub.credentials_json.fbUid} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(sub.credentials_json.fbUid)} /></p>
+                          {parsedCreds.fbUid && (
+                            <p className="flex items-center gap-2"><span className="text-indigo-400">User ID (UID):</span> {parsedCreds.fbUid} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(parsedCreds.fbUid)} /></p>
                           )}
-                          {sub.credentials_json.emailPhone && (
-                            <p className="flex items-center gap-2"><span className="text-indigo-400">Email/Phone:</span> {sub.credentials_json.emailPhone} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(sub.credentials_json.emailPhone)} /></p>
+                          {parsedCreds.emailPhone && (
+                            <p className="flex items-center gap-2"><span className="text-indigo-400">Email/Phone:</span> {parsedCreds.emailPhone} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(parsedCreds.emailPhone)} /></p>
                           )}
-                          {!sub.credentials_json.fbUid && !sub.credentials_json.emailPhone && (
-                            <p className="flex items-center gap-2"><span className="text-indigo-400">Number/Email:</span> {sub.credentials_json.identifier || sub.credentials_json.fbUid} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(sub.credentials_json.identifier || sub.credentials_json.fbUid)} /></p>
+                          {!parsedCreds.fbUid && !parsedCreds.emailPhone && (
+                            <p className="flex items-center gap-2"><span className="text-indigo-400">Number/Email:</span> {parsedCreds.identifier || parsedCreds.fbUid} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(parsedCreds.identifier || parsedCreds.fbUid)} /></p>
                           )}
-                          <p className="flex items-center gap-2"><span className="text-indigo-400">Password:</span> {sub.credentials_json.password || sub.credentials_json.fbPassword} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(sub.credentials_json.password || sub.credentials_json.fbPassword)} /></p>
-                          {(sub.credentials_json.twoFAKey || sub.credentials_json.fb2FA) && <p className="flex items-center gap-2"><span className="text-indigo-400">2FA Key:</span> {sub.credentials_json.twoFAKey || sub.credentials_json.fb2FA} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(sub.credentials_json.twoFAKey || sub.credentials_json.fb2FA)} /></p>}
-                          <p><span className="text-indigo-400">Profile Link:</span> {sub.credentials_json.profileLink || `https://facebook.com/profile.php?id=${sub.credentials_json.fbUid || sub.credentials_json.identifier}`}</p>
+                          <p className="flex items-center gap-2"><span className="text-indigo-400">Password:</span> {parsedCreds.password || parsedCreds.fbPassword} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(parsedCreds.password || parsedCreds.fbPassword)} /></p>
+                          {(parsedCreds.twoFAKey || parsedCreds.fb2FA) && <p className="flex items-center gap-2"><span className="text-indigo-400">2FA Key:</span> {parsedCreds.twoFAKey || parsedCreds.fb2FA} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(parsedCreds.twoFAKey || parsedCreds.fb2FA)} /></p>}
+                          <p><span className="text-indigo-400">Profile Link:</span> {parsedCreds.profileLink || `https://facebook.com/profile.php?id=${parsedCreds.fbUid || parsedCreds.identifier}`}</p>
+                        </div>
+                      )}
+                      
+                      {(sub.type === 'microjob' || sub.type === 'dailyjob') && parsedCreds && (
+                        <div className="space-y-1">
+                          <p className="flex items-center gap-2"><span className="text-indigo-400">Title:</span> {parsedCreds.job_title}</p>
+                          <p className="flex items-center gap-2"><span className="text-indigo-400">Proof:</span> {parsedCreds.proof}</p>
                         </div>
                       )}
                       {sub.type === 'instagram' && (
                         <div className="space-y-1">
-                          <p className="flex items-center gap-2"><span className="text-indigo-400">Username/Number:</span> {sub.credentials_json.identifier || sub.credentials_json.igUid} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(sub.credentials_json.identifier || sub.credentials_json.igUid)} /></p>
-                          <p className="flex items-center gap-2"><span className="text-indigo-400">Password:</span> {sub.credentials_json.password || sub.credentials_json.igPassword} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(sub.credentials_json.password || sub.credentials_json.igPassword)} /></p>
-                          {(sub.credentials_json.twoFAKey || sub.credentials_json.ig2FA) && <p className="flex items-center gap-2"><span className="text-indigo-400">2FA Key:</span> {sub.credentials_json.twoFAKey || sub.credentials_json.ig2FA} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(sub.credentials_json.twoFAKey || sub.credentials_json.ig2FA)} /></p>}
-                          <p><span className="text-indigo-400">Profile Link:</span> {sub.credentials_json.profileLink || `https://instagram.com/${sub.credentials_json.igUid || sub.credentials_json.identifier}`}</p>
+                          <p className="flex items-center gap-2"><span className="text-indigo-400">Username/Number:</span> {parsedCreds.identifier || parsedCreds.igUid} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(parsedCreds.identifier || parsedCreds.igUid)} /></p>
+                          <p className="flex items-center gap-2"><span className="text-indigo-400">Password:</span> {parsedCreds.password || parsedCreds.igPassword} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(parsedCreds.password || parsedCreds.igPassword)} /></p>
+                          {(parsedCreds.twoFAKey || parsedCreds.ig2FA) && <p className="flex items-center gap-2"><span className="text-indigo-400">2FA Key:</span> {parsedCreds.twoFAKey || parsedCreds.ig2FA} <Copy className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => navigator.clipboard.writeText(parsedCreds.twoFAKey || parsedCreds.ig2FA)} /></p>}
+                          <p><span className="text-indigo-400">Profile Link:</span> {parsedCreds.profileLink || `https://instagram.com/${parsedCreds.igUid || parsedCreds.identifier}`}</p>
                         </div>
                       )}
                     </div>
@@ -911,7 +1051,8 @@ export default function Admin() {
                     </div>
                   )}
                 </div>
-              ))
+              );
+            })
             )}
           </div>
         )}
